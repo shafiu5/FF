@@ -37,6 +37,7 @@ export type Expense = {
   expense_date: string
   vendor: string
   notes: string
+  receipt_path: string | null
   created_at: string
 }
 

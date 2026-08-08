@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Plus, X, Trash2 } from 'lucide-react'
+import { Plus, X, Trash2, Paperclip } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
 import { EXPENSE_CATEGORY_SUGGESTIONS } from '@/lib/types'
@@ -21,6 +21,7 @@ type ExpenseRow = {
   expense_date: string
   vendor: string
   notes: string
+  receipt_path: string | null
   vessels: { name: string } | null
 }
 type FuelCostRow = {
@@ -39,6 +40,7 @@ type DisplayRow = {
   date: string
   vendor: string
   vesselName: string
+  receiptPath: string | null
 }
 type IncomeRow = {
   id: string
@@ -68,8 +70,10 @@ export default function ExpensesPage() {
   const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [vendor, setVendor] = useState('')
   const [notes, setNotes] = useState('')
+  const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [viewingReceiptId, setViewingReceiptId] = useState<string | null>(null)
 
   const [from, setFrom] = useState(() => currentMonthRange().from)
   const [to, setTo] = useState(() => currentMonthRange().to)
@@ -94,7 +98,7 @@ export default function ExpensesPage() {
         supabase
           .from('expenses')
           .select(
-            'id, vessel_id, category, amount, has_tax, tax_percent, tax_amount, expense_date, vendor, notes, vessels(name)'
+            'id, vessel_id, category, amount, has_tax, tax_percent, tax_amount, expense_date, vendor, notes, receipt_path, vessels(name)'
           )
           .order('expense_date', { ascending: false }),
         supabase
@@ -132,35 +136,67 @@ export default function ExpensesPage() {
     e.preventDefault()
     setSaving(true)
     setError(null)
-    const { error } = await supabase.from('expenses').insert({
-      vessel_id: vesselId || null,
-      category: category.trim() || 'Other',
-      amount: Number(amount),
-      has_tax: hasTax,
-      tax_percent: hasTax ? defaultTaxPercent : null,
-      tax_amount: hasTax ? extractTax(Number(amount) || 0, defaultTaxPercent) : null,
-      expense_date: expenseDate,
-      vendor,
-      notes,
-    })
-    setSaving(false)
-    if (error) {
-      setError(error.message)
+    const { data: entry, error } = await supabase
+      .from('expenses')
+      .insert({
+        vessel_id: vesselId || null,
+        category: category.trim() || 'Other',
+        amount: Number(amount),
+        has_tax: hasTax,
+        tax_percent: hasTax ? defaultTaxPercent : null,
+        tax_amount: hasTax ? extractTax(Number(amount) || 0, defaultTaxPercent) : null,
+        expense_date: expenseDate,
+        vendor,
+        notes,
+      })
+      .select('id')
+      .single()
+    if (error || !entry) {
+      setSaving(false)
+      setError(error?.message ?? 'Failed to save expense.')
       return
     }
+    if (receiptFile) {
+      const path = `${entry.id}/${receiptFile.name}`
+      const { error: uploadError } = await supabase.storage.from('receipts').upload(path, receiptFile)
+      if (uploadError) {
+        setSaving(false)
+        setError(`Expense saved, but the receipt photo failed to upload: ${uploadError.message}`)
+        load()
+        return
+      }
+      await supabase.from('expenses').update({ receipt_path: path }).eq('id', entry.id)
+    }
+    setSaving(false)
     setVesselId('')
     setCategory('')
     setAmount('')
     setHasTax(false)
     setVendor('')
     setNotes('')
+    setReceiptFile(null)
     setShowAdd(false)
     load()
   }
 
+  async function viewReceipt(path: string, id: string) {
+    setViewingReceiptId(id)
+    const { data, error } = await supabase.storage.from('receipts').createSignedUrl(path, 3600)
+    setViewingReceiptId(null)
+    if (error || !data) {
+      setError(error?.message ?? 'Failed to open receipt.')
+      return
+    }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+  }
+
   async function deleteExpense(id: string) {
     setDeletingId(id)
+    const receiptPath = expenses.find((e) => e.id === id)?.receipt_path
     const { error } = await supabase.from('expenses').delete().eq('id', id)
+    if (!error && receiptPath) {
+      await supabase.storage.from('receipts').remove([receiptPath])
+    }
     setDeletingId(null)
     if (!error) setExpenses((prev) => prev.filter((e) => e.id !== id))
   }
@@ -179,6 +215,7 @@ export default function ExpensesPage() {
       date: e.expense_date,
       vendor: e.vendor,
       vesselName: e.vessels?.name ?? 'Unassigned',
+      receiptPath: e.receipt_path,
     }))
     const fuel: DisplayRow[] = fuelCosts
       .filter((f) => f.cost != null)
@@ -191,6 +228,7 @@ export default function ExpensesPage() {
         date: f.filled_at,
         vendor: `${f.quantity.toLocaleString()} L`,
         vesselName: vesselNames.get(f.vessel_id) ?? 'Unassigned',
+        receiptPath: null,
       }))
     return [...manual, ...fuel].sort((a, b) => (a.date < b.date ? 1 : -1))
   }, [expenses, fuelCosts, vesselNames])
@@ -376,6 +414,16 @@ export default function ExpensesPage() {
             rows={2}
             className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2"
           />
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Receipt photo (optional)</label>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
+              className="w-full text-sm"
+            />
+          </div>
           {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
           <button
             disabled={saving}
@@ -431,6 +479,16 @@ export default function ExpensesPage() {
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <span className="font-medium">{formatMVR(e.amount)}</span>
+                    {e.receiptPath && (
+                      <button
+                        onClick={() => viewReceipt(e.receiptPath!, e.id)}
+                        disabled={viewingReceiptId === e.id}
+                        className="text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-sky-50 dark:hover:bg-sky-950/30 active:bg-sky-100 dark:active:bg-sky-950/50 disabled:opacity-50"
+                        aria-label="View receipt"
+                      >
+                        <Paperclip size={16} strokeWidth={1.75} />
+                      </button>
+                    )}
                     {e.kind === 'manual' && (
                       <button
                         onClick={() => deleteExpense(e.id)}
