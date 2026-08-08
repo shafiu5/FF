@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import Link from 'next/link'
-import { Plus, X, Upload, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, X, Upload, Trash2, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
 import DateRangeFilter from '@/components/DateRangeFilter'
@@ -49,6 +49,12 @@ export default function IncomePage() {
   const [to, setTo] = useState(() => currentMonthRange().to)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editVesselId, setEditVesselId] = useState('')
+  const [editDate, setEditDate] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [lines, setLines] = useState<Record<string, IncomeEntryLine[]>>({})
@@ -127,6 +133,34 @@ export default function IncomePage() {
     const { error } = await supabase.from('income_entries').delete().eq('id', id)
     setDeletingId(null)
     if (!error) setIncome((prev) => prev.filter((i) => i.id !== id))
+  }
+
+  function startEdit(entry: IncomeRow) {
+    setEditingId(entry.id)
+    setEditVesselId(entry.vessel_id ?? '')
+    setEditDate(entry.income_date)
+    setEditError(null)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditError(null)
+  }
+
+  async function saveEdit(id: string) {
+    setSavingEdit(true)
+    setEditError(null)
+    const { error } = await supabase
+      .from('income_entries')
+      .update({ vessel_id: editVesselId || null, income_date: editDate })
+      .eq('id', id)
+    setSavingEdit(false)
+    if (error) {
+      setEditError(error.message)
+      return
+    }
+    setEditingId(null)
+    load()
   }
 
   async function toggleExpand(id: string) {
@@ -345,6 +379,13 @@ export default function IncomePage() {
                         )}
                       </span>
                       <button
+                        onClick={() => (editingId === i.id ? cancelEdit() : startEdit(i))}
+                        className="text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-sky-50 dark:hover:bg-sky-950/30 active:bg-sky-100 dark:active:bg-sky-950/50"
+                        aria-label="Edit date/vessel"
+                      >
+                        <Pencil size={16} strokeWidth={1.75} />
+                      </button>
+                      <button
                         onClick={() => deleteIncome(i.id)}
                         disabled={deletingId === i.id}
                         className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-red-50 dark:hover:bg-red-950/30 active:bg-red-100 dark:active:bg-red-950/50 disabled:opacity-50"
@@ -354,6 +395,48 @@ export default function IncomePage() {
                       </button>
                     </div>
                   </div>
+                  {editingId === i.id && (
+                    <div className="px-4 pb-3 pl-10 flex flex-wrap items-end gap-2">
+                      <div>
+                        <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-0.5">Date</label>
+                        <input
+                          type="date"
+                          value={editDate}
+                          onChange={(e) => setEditDate(e.target.value)}
+                          className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-0.5">Vessel</label>
+                        <select
+                          value={editVesselId}
+                          onChange={(e) => setEditVesselId(e.target.value)}
+                          className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-sm"
+                        >
+                          <option value="">Unassigned</option>
+                          {vessels.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={() => saveEdit(i.id)}
+                        disabled={savingEdit}
+                        className="rounded-lg bg-sky-600 text-white px-3 py-1.5 text-sm font-medium transition-colors hover:bg-sky-700 active:bg-sky-800 disabled:opacity-50"
+                      >
+                        {savingEdit ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        onClick={cancelEdit}
+                        className="rounded-lg border border-gray-300 dark:border-neutral-700 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800"
+                      >
+                        Cancel
+                      </button>
+                      {editError && <p className="w-full text-xs text-red-600 dark:text-red-400">{editError}</p>}
+                    </div>
+                  )}
                   {expanded && (
                     <div className="px-4 pb-3 pl-10">
                       {loadingLines === i.id ? (
