@@ -1,0 +1,211 @@
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import { createClient } from '@/lib/supabase/client'
+import { formatMVR } from '@/lib/currency'
+import DateRangeFilter from '@/components/DateRangeFilter'
+import type { Vessel } from '@/lib/types'
+import { currentMonthRange } from '@/lib/dateRange'
+
+type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
+type IncomeRow = { vessel_id: string | null; amount: number; income_date: string; is_tax_free: boolean }
+type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
+
+export default function DashboardPage() {
+  const supabase = createClient()
+  const [vessels, setVessels] = useState<Vessel[]>([])
+  const [expenses, setExpenses] = useState<ExpenseRow[]>([])
+  const [income, setIncome] = useState<IncomeRow[]>([])
+  const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  const [from, setFrom] = useState(() => currentMonthRange().from)
+  const [to, setTo] = useState(() => currentMonthRange().to)
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  async function load() {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const [vesselsRes, expensesRes, incomeRes, fuelRes] = await Promise.all([
+        supabase.from('vessels').select('id, name, notes, created_at').order('name'),
+        supabase.from('expenses').select('vessel_id, amount, expense_date'),
+        supabase.from('income_entries').select('vessel_id, amount, income_date, is_tax_free'),
+        supabase.from('fuel_entry_cost').select('vessel_id, cost, filled_at'),
+      ])
+      if (vesselsRes.error) throw vesselsRes.error
+      if (expensesRes.error) throw expensesRes.error
+      if (incomeRes.error) throw incomeRes.error
+      if (fuelRes.error) throw fuelRes.error
+      setVessels((vesselsRes.data as Vessel[]) ?? [])
+      setExpenses((expensesRes.data as ExpenseRow[]) ?? [])
+      setIncome((incomeRes.data as IncomeRow[]) ?? [])
+      setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load the dashboard.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const filteredExpenses = useMemo(
+    () => expenses.filter((e) => (!from || e.expense_date >= from) && (!to || e.expense_date <= to)),
+    [expenses, from, to]
+  )
+  const filteredIncome = useMemo(
+    () => income.filter((i) => (!from || i.income_date >= from) && (!to || i.income_date <= to)),
+    [income, from, to]
+  )
+  const filteredFuel = useMemo(
+    () =>
+      fuelCosts.filter(
+        (f) => f.cost != null && (!from || f.filled_at >= from) && (!to || f.filled_at <= to)
+      ),
+    [fuelCosts, from, to]
+  )
+
+  const totalIncome = useMemo(() => filteredIncome.reduce((s, i) => s + i.amount, 0), [filteredIncome])
+  const taxFreeIncome = useMemo(
+    () => filteredIncome.filter((i) => i.is_tax_free).reduce((s, i) => s + i.amount, 0),
+    [filteredIncome]
+  )
+  const manualExpenseTotal = useMemo(() => filteredExpenses.reduce((s, e) => s + e.amount, 0), [filteredExpenses])
+  const fuelExpenseTotal = useMemo(() => filteredFuel.reduce((s, f) => s + (f.cost ?? 0), 0), [filteredFuel])
+  const totalExpense = manualExpenseTotal + fuelExpenseTotal
+  const net = totalIncome - totalExpense
+
+  const perVessel = useMemo(() => {
+    const map = new Map<string, { expense: number; income: number }>()
+    for (const v of vessels) map.set(v.id, { expense: 0, income: 0 })
+    for (const e of filteredExpenses) {
+      if (!e.vessel_id) continue
+      const t = map.get(e.vessel_id)
+      if (t) t.expense += e.amount
+    }
+    for (const f of filteredFuel) {
+      const t = map.get(f.vessel_id)
+      if (t) t.expense += f.cost ?? 0
+    }
+    for (const i of filteredIncome) {
+      if (!i.vessel_id) continue
+      const t = map.get(i.vessel_id)
+      if (t) t.income += i.amount
+    }
+    return vessels
+      .map((v) => ({ vessel: v, ...map.get(v.id)! }))
+      .sort((a, b) => b.income - b.expense - (a.income - a.expense))
+  }, [vessels, filteredExpenses, filteredFuel, filteredIncome])
+
+  const monthly = useMemo(() => {
+    const map = new Map<string, { month: string; income: number; expense: number }>()
+    function bucket(date: string) {
+      const month = date.slice(0, 7)
+      if (!map.has(month)) map.set(month, { month, income: 0, expense: 0 })
+      return map.get(month)!
+    }
+    for (const i of filteredIncome) bucket(i.income_date).income += i.amount
+    for (const e of filteredExpenses) bucket(e.expense_date).expense += e.amount
+    for (const f of filteredFuel) bucket(f.filled_at).expense += f.cost ?? 0
+    return [...map.values()].sort((a, b) => (a.month < b.month ? -1 : 1))
+  }, [filteredIncome, filteredExpenses, filteredFuel])
+
+  return (
+    <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+      <h1 className="text-2xl font-bold">Dashboard</h1>
+
+      {loading ? (
+        <p className="text-gray-400 dark:text-gray-500">Loading…</p>
+      ) : loadError ? (
+        <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
+          <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
+          <button
+            onClick={load}
+            className="text-sm font-medium text-sky-600 dark:text-sky-400 transition-colors hover:text-sky-700 dark:hover:text-sky-300"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <>
+          <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Income</p>
+              <p className="font-semibold text-emerald-600 dark:text-emerald-400">{formatMVR(totalIncome)}</p>
+              {taxFreeIncome > 0 && (
+                <p className="text-[11px] text-gray-400 dark:text-gray-500">{formatMVR(taxFreeIncome)} tax-free</p>
+              )}
+            </div>
+            <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Expenses</p>
+              <p className="font-semibold text-red-600 dark:text-red-400">{formatMVR(totalExpense)}</p>
+              <p className="text-[11px] text-gray-400 dark:text-gray-500">incl. {formatMVR(fuelExpenseTotal)} fuel</p>
+            </div>
+            <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Net</p>
+              <p className={`font-semibold ${net >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                {formatMVR(net)}
+              </p>
+            </div>
+          </div>
+
+          {monthly.length > 0 && (
+            <div className="h-56 rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthly}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-neutral-800" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip formatter={(v: number) => formatMVR(v)} />
+                  <Legend />
+                  <Bar dataKey="income" fill="#059669" name="Income" />
+                  <Bar dataKey="expense" fill="#dc2626" name="Expense" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <section>
+            <h2 className="font-semibold mb-2">By vessel</h2>
+            {perVessel.length === 0 ? (
+              <p className="text-sm text-gray-400 dark:text-gray-500">No vessels yet.</p>
+            ) : (
+              <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-gray-100 dark:divide-neutral-800 overflow-hidden">
+                {perVessel.map(({ vessel, income, expense }) => (
+                  <Link
+                    key={vessel.id}
+                    href={`/vessels/${vessel.id}`}
+                    className="flex items-center justify-between px-4 py-3 text-sm transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60 active:bg-gray-100 dark:active:bg-neutral-800"
+                  >
+                    <p className="font-medium">{vessel.name}</p>
+                    <span
+                      className={`font-medium ${income - expense >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
+                    >
+                      {formatMVR(income - expense)}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </main>
+  )
+}
