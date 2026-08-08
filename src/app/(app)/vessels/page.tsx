@@ -7,10 +7,14 @@ import { formatMVR } from '@/lib/currency'
 import type { Vessel } from '@/lib/types'
 import DateRangeFilter from '@/components/DateRangeFilter'
 import { currentMonthRange } from '@/lib/dateRange'
+import { formatPercent, profitMargin } from '@/lib/margin'
 
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
 type IncomeRow = { vessel_id: string | null; amount: number; income_date: string }
 type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
+type PassengerLineRow = {
+  income_entries: { vessel_id: string | null; income_date: string } | null
+}
 
 export default function VesselsPage() {
   const supabase = createClient()
@@ -18,6 +22,7 @@ export default function VesselsPage() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
+  const [passengerLines, setPassengerLines] = useState<PassengerLineRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -32,20 +37,23 @@ export default function VesselsPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [vesselsRes, expensesRes, incomeRes, fuelRes] = await Promise.all([
+      const [vesselsRes, expensesRes, incomeRes, fuelRes, passengerLinesRes] = await Promise.all([
         supabase.from('vessels').select('id, name, notes, created_at').order('name'),
         supabase.from('expenses').select('vessel_id, amount, expense_date'),
         supabase.from('income_entries').select('vessel_id, amount, income_date'),
         supabase.from('fuel_entry_cost').select('vessel_id, cost, filled_at'),
+        supabase.from('income_entry_lines').select('income_entries(vessel_id, income_date)'),
       ])
       if (vesselsRes.error) throw vesselsRes.error
       if (expensesRes.error) throw expensesRes.error
       if (incomeRes.error) throw incomeRes.error
       if (fuelRes.error) throw fuelRes.error
+      if (passengerLinesRes.error) throw passengerLinesRes.error
       setVessels((vesselsRes.data as Vessel[]) ?? [])
       setExpenses((expensesRes.data as ExpenseRow[]) ?? [])
       setIncome((incomeRes.data as IncomeRow[]) ?? [])
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
+      setPassengerLines((passengerLinesRes.data as unknown as PassengerLineRow[]) ?? [])
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load vessels.')
     } finally {
@@ -56,9 +64,9 @@ export default function VesselsPage() {
   const inRange = (date: string) => (!from || date >= from) && (!to || date <= to)
 
   const totals = useMemo(() => {
-    const map = new Map<string, { expense: number; income: number }>()
-    for (const v of vessels) map.set(v.id, { expense: 0, income: 0 })
-    const unassigned = { expense: 0, income: 0 }
+    const map = new Map<string, { expense: number; income: number; passengers: number }>()
+    for (const v of vessels) map.set(v.id, { expense: 0, income: 0, passengers: 0 })
+    const unassigned = { expense: 0, income: 0, passengers: 0 }
     for (const e of expenses) {
       if (!inRange(e.expense_date)) continue
       if (!e.vessel_id) {
@@ -82,8 +90,18 @@ export default function VesselsPage() {
       const t = map.get(i.vessel_id)
       if (t) t.income += i.amount
     }
+    for (const l of passengerLines) {
+      const entry = l.income_entries
+      if (!entry || !inRange(entry.income_date)) continue
+      if (!entry.vessel_id) {
+        unassigned.passengers += 1
+        continue
+      }
+      const t = map.get(entry.vessel_id)
+      if (t) t.passengers += 1
+    }
     return { map, unassigned }
-  }, [vessels, expenses, income, fuelCosts, from, to])
+  }, [vessels, expenses, income, fuelCosts, passengerLines, from, to])
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
@@ -110,8 +128,9 @@ export default function VesselsPage() {
       ) : (
         <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-gray-100 dark:divide-neutral-800 overflow-hidden">
           {vessels.map((v) => {
-            const t = totals.map.get(v.id) ?? { expense: 0, income: 0 }
+            const t = totals.map.get(v.id) ?? { expense: 0, income: 0, passengers: 0 }
             const net = t.income - t.expense
+            const margin = profitMargin(t.income, t.expense)
             return (
               <Link
                 key={v.id}
@@ -123,6 +142,10 @@ export default function VesselsPage() {
                   <p className="text-xs text-gray-400 dark:text-gray-500">
                     {formatMVR(t.income)} in · {formatMVR(t.expense)} out
                   </p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500">
+                    {margin == null ? '—' : formatPercent(margin)} margin
+                    {t.passengers > 0 && ` · ${t.passengers.toLocaleString()} passengers`}
+                  </p>
                 </div>
                 <span
                   className={`font-medium ${net >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
@@ -132,12 +155,20 @@ export default function VesselsPage() {
               </Link>
             )
           })}
-          {(totals.unassigned.income !== 0 || totals.unassigned.expense !== 0) && (
+          {(totals.unassigned.income !== 0 || totals.unassigned.expense !== 0 || totals.unassigned.passengers !== 0) && (
             <div className="flex items-center justify-between px-4 py-3">
               <div>
                 <p className="font-medium text-gray-500 dark:text-gray-400 italic">Unassigned</p>
                 <p className="text-xs text-gray-400 dark:text-gray-500">
                   {formatMVR(totals.unassigned.income)} in · {formatMVR(totals.unassigned.expense)} out
+                </p>
+                <p className="text-xs text-gray-400 dark:text-gray-500">
+                  {(() => {
+                    const m = profitMargin(totals.unassigned.income, totals.unassigned.expense)
+                    return m == null ? '—' : formatPercent(m)
+                  })()}{' '}
+                  margin
+                  {totals.unassigned.passengers > 0 && ` · ${totals.unassigned.passengers.toLocaleString()} passengers`}
                 </p>
               </div>
               <span

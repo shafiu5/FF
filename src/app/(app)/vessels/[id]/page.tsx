@@ -9,6 +9,7 @@ import { formatMVR } from '@/lib/currency'
 import DateRangeFilter from '@/components/DateRangeFilter'
 import type { Vessel } from '@/lib/types'
 import { currentMonthRange } from '@/lib/dateRange'
+import { formatPercent, profitMargin } from '@/lib/margin'
 
 type ExpenseRow = { id: string; category: string; amount: number; expense_date: string; vendor: string }
 type IncomeRow = {
@@ -37,6 +38,7 @@ export default function VesselDetailPage() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
+  const [passengerDates, setPassengerDates] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -51,7 +53,7 @@ export default function VesselDetailPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [vesselRes, expensesRes, incomeRes, fuelRes] = await Promise.all([
+      const [vesselRes, expensesRes, incomeRes, fuelRes, passengerLinesRes] = await Promise.all([
         supabase.from('vessels').select('id, name, notes, created_at').eq('id', id).maybeSingle(),
         supabase
           .from('expenses')
@@ -68,15 +70,23 @@ export default function VesselDetailPage() {
           .select('id, quantity, cost, filled_at')
           .eq('vessel_id', id)
           .order('filled_at', { ascending: false }),
+        supabase
+          .from('income_entry_lines')
+          .select('income_entries!inner(vessel_id, income_date)')
+          .eq('income_entries.vessel_id', id),
       ])
       if (vesselRes.error) throw vesselRes.error
       if (expensesRes.error) throw expensesRes.error
       if (incomeRes.error) throw incomeRes.error
       if (fuelRes.error) throw fuelRes.error
+      if (passengerLinesRes.error) throw passengerLinesRes.error
       setVessel(vesselRes.data as Vessel | null)
       setExpenses((expensesRes.data as ExpenseRow[]) ?? [])
       setIncome((incomeRes.data as IncomeRow[]) ?? [])
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
+      const passengerRows =
+        (passengerLinesRes.data as unknown as { income_entries: { income_date: string } | null }[]) ?? []
+      setPassengerDates(passengerRows.map((r) => r.income_entries?.income_date).filter((d): d is string => !!d))
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load this vessel.')
     } finally {
@@ -124,6 +134,11 @@ export default function VesselDetailPage() {
     () => -filtered.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0),
     [filtered]
   )
+  const totalPassengers = useMemo(
+    () => passengerDates.filter((d) => (!from || d >= from) && (!to || d <= to)).length,
+    [passengerDates, from, to]
+  )
+  const margin = profitMargin(totalIncome, totalExpense)
 
   if (loading) {
     return <main className="max-w-2xl mx-auto px-4 py-6 text-gray-400 dark:text-gray-500">Loading…</main>
@@ -180,6 +195,10 @@ export default function VesselDetailPage() {
           >
             {formatMVR(totalIncome - totalExpense)} net
           </span>
+        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {margin == null ? '—' : formatPercent(margin)} margin
+          {totalPassengers > 0 && ` · ${totalPassengers.toLocaleString()} passengers`}
         </p>
       </div>
 

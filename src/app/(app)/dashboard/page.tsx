@@ -17,10 +17,14 @@ import { formatMVR } from '@/lib/currency'
 import DateRangeFilter from '@/components/DateRangeFilter'
 import type { Vessel } from '@/lib/types'
 import { currentMonthRange } from '@/lib/dateRange'
+import { formatPercent, profitMargin } from '@/lib/margin'
 
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
 type IncomeRow = { vessel_id: string | null; amount: number; income_date: string; is_tax_free: boolean }
 type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
+type PassengerLineRow = {
+  income_entries: { vessel_id: string | null; income_date: string } | null
+}
 
 export default function DashboardPage() {
   const supabase = createClient()
@@ -28,6 +32,7 @@ export default function DashboardPage() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
+  const [passengerLines, setPassengerLines] = useState<PassengerLineRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -42,20 +47,23 @@ export default function DashboardPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [vesselsRes, expensesRes, incomeRes, fuelRes] = await Promise.all([
+      const [vesselsRes, expensesRes, incomeRes, fuelRes, passengerLinesRes] = await Promise.all([
         supabase.from('vessels').select('id, name, notes, created_at').order('name'),
         supabase.from('expenses').select('vessel_id, amount, expense_date'),
         supabase.from('income_entries').select('vessel_id, amount, income_date, is_tax_free'),
         supabase.from('fuel_entry_cost').select('vessel_id, cost, filled_at'),
+        supabase.from('income_entry_lines').select('income_entries(vessel_id, income_date)'),
       ])
       if (vesselsRes.error) throw vesselsRes.error
       if (expensesRes.error) throw expensesRes.error
       if (incomeRes.error) throw incomeRes.error
       if (fuelRes.error) throw fuelRes.error
+      if (passengerLinesRes.error) throw passengerLinesRes.error
       setVessels((vesselsRes.data as Vessel[]) ?? [])
       setExpenses((expensesRes.data as ExpenseRow[]) ?? [])
       setIncome((incomeRes.data as IncomeRow[]) ?? [])
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
+      setPassengerLines((passengerLinesRes.data as unknown as PassengerLineRow[]) ?? [])
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load the dashboard.')
     } finally {
@@ -79,6 +87,15 @@ export default function DashboardPage() {
     [fuelCosts, from, to]
   )
 
+  const filteredPassengerLines = useMemo(
+    () =>
+      passengerLines.filter(
+        (l) => l.income_entries && (!from || l.income_entries.income_date >= from) && (!to || l.income_entries.income_date <= to)
+      ),
+    [passengerLines, from, to]
+  )
+  const totalPassengers = filteredPassengerLines.length
+
   const totalIncome = useMemo(() => filteredIncome.reduce((s, i) => s + i.amount, 0), [filteredIncome])
   const taxFreeIncome = useMemo(
     () => filteredIncome.filter((i) => i.is_tax_free).reduce((s, i) => s + i.amount, 0),
@@ -88,13 +105,21 @@ export default function DashboardPage() {
   const fuelExpenseTotal = useMemo(() => filteredFuel.reduce((s, f) => s + (f.cost ?? 0), 0), [filteredFuel])
   const totalExpense = manualExpenseTotal + fuelExpenseTotal
   const net = totalIncome - totalExpense
+  const fleetMargin = profitMargin(totalIncome, totalExpense)
 
-  type VesselTotal = { id: string; name: string; income: number; expense: number; isUnassigned: boolean }
+  type VesselTotal = {
+    id: string
+    name: string
+    income: number
+    expense: number
+    passengers: number
+    isUnassigned: boolean
+  }
 
   const perVessel = useMemo(() => {
-    const map = new Map<string, { expense: number; income: number }>()
-    for (const v of vessels) map.set(v.id, { expense: 0, income: 0 })
-    const unassigned = { expense: 0, income: 0 }
+    const map = new Map<string, { expense: number; income: number; passengers: number }>()
+    for (const v of vessels) map.set(v.id, { expense: 0, income: 0, passengers: 0 })
+    const unassigned = { expense: 0, income: 0, passengers: 0 }
     for (const e of filteredExpenses) {
       if (!e.vessel_id) {
         unassigned.expense += e.amount
@@ -115,17 +140,26 @@ export default function DashboardPage() {
       const t = map.get(i.vessel_id)
       if (t) t.income += i.amount
     }
+    for (const l of filteredPassengerLines) {
+      const vesselId = l.income_entries?.vessel_id
+      if (!vesselId) {
+        unassigned.passengers += 1
+        continue
+      }
+      const t = map.get(vesselId)
+      if (t) t.passengers += 1
+    }
     const rows: VesselTotal[] = vessels.map((v) => ({
       id: v.id,
       name: v.name,
       isUnassigned: false,
       ...map.get(v.id)!,
     }))
-    if (unassigned.income !== 0 || unassigned.expense !== 0) {
+    if (unassigned.income !== 0 || unassigned.expense !== 0 || unassigned.passengers !== 0) {
       rows.push({ id: '__unassigned', name: 'Unassigned', isUnassigned: true, ...unassigned })
     }
     return rows.sort((a, b) => b.income - b.expense - (a.income - a.expense))
-  }, [vessels, filteredExpenses, filteredFuel, filteredIncome])
+  }, [vessels, filteredExpenses, filteredFuel, filteredIncome, filteredPassengerLines])
 
   const monthly = useMemo(() => {
     const map = new Map<string, { month: string; income: number; expense: number }>()
@@ -181,6 +215,27 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Profit margin (fleet)</p>
+              <p
+                className={`font-semibold ${
+                  fleetMargin == null
+                    ? 'text-gray-400 dark:text-gray-500'
+                    : fleetMargin >= 0
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-red-600 dark:text-red-400'
+                }`}
+              >
+                {fleetMargin == null ? '—' : formatPercent(fleetMargin)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Passengers</p>
+              <p className="font-semibold text-gray-900 dark:text-gray-100">{totalPassengers.toLocaleString()}</p>
+            </div>
+          </div>
+
           {monthly.length > 0 && (
             <div className="h-56 rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-2">
               <ResponsiveContainer width="100%" height="100%">
@@ -203,12 +258,19 @@ export default function DashboardPage() {
               <p className="text-sm text-gray-400 dark:text-gray-500">No vessels yet.</p>
             ) : (
               <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-gray-100 dark:divide-neutral-800 overflow-hidden">
-                {perVessel.map(({ id, name, income, expense, isUnassigned }) => {
+                {perVessel.map(({ id, name, income, expense, passengers, isUnassigned }) => {
+                  const margin = profitMargin(income, expense)
                   const row = (
                     <>
-                      <p className={`font-medium ${isUnassigned ? 'text-gray-500 dark:text-gray-400 italic' : ''}`}>
-                        {name}
-                      </p>
+                      <div>
+                        <p className={`font-medium ${isUnassigned ? 'text-gray-500 dark:text-gray-400 italic' : ''}`}>
+                          {name}
+                        </p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                          {margin == null ? '—' : formatPercent(margin)} margin
+                          {passengers > 0 && ` · ${passengers.toLocaleString()} passengers`}
+                        </p>
+                      </div>
                       <span
                         className={`font-medium ${income - expense >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
                       >
