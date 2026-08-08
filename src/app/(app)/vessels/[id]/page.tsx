@@ -183,23 +183,47 @@ export default function VesselDetailPage() {
         Vessels
       </Link>
       <div>
-        <h1 className="text-2xl font-bold">{vessel.name}</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          {formatMVR(totalIncome)} in · {formatMVR(totalExpense)} out ·{' '}
-          <span
-            className={
-              totalIncome - totalExpense >= 0
-                ? 'text-emerald-600 dark:text-emerald-400 font-medium'
-                : 'text-red-600 dark:text-red-400 font-medium'
-            }
-          >
-            {formatMVR(totalIncome - totalExpense)} net
-          </span>
-        </p>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {margin == null ? '—' : formatPercent(margin)} margin
-          {totalPassengers > 0 && ` · ${totalPassengers.toLocaleString()} passengers`}
-        </p>
+        <h1 className="text-2xl font-bold mb-3">{vessel.name}</h1>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">Net</p>
+            <p
+              className={`text-lg font-bold ${
+                totalIncome - totalExpense >= 0
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-red-600 dark:text-red-400'
+              }`}
+            >
+              {formatMVR(totalIncome - totalExpense)}
+            </p>
+            <p className="text-[11px] text-gray-400 dark:text-gray-500">
+              {formatMVR(totalIncome)} in · {formatMVR(totalExpense)} out
+            </p>
+          </div>
+          <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">Profit margin</p>
+            <p
+              className={`text-lg font-bold ${
+                margin == null
+                  ? 'text-gray-400 dark:text-gray-500'
+                  : margin >= 0
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-red-600 dark:text-red-400'
+              }`}
+            >
+              {margin == null ? '—' : formatPercent(margin)}
+            </p>
+            <p className="text-[11px] text-gray-400 dark:text-gray-500">
+              {formatMVR(totalIncome - totalExpense)} ÷ {formatMVR(totalIncome)}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">Passengers</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              {totalPassengers.toLocaleString()}
+            </p>
+          </div>
+        </div>
       </div>
 
       <section>
