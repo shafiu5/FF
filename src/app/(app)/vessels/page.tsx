@@ -5,10 +5,12 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
 import type { Vessel } from '@/lib/types'
+import DateRangeFilter from '@/components/DateRangeFilter'
+import { currentMonthRange } from '@/lib/dateRange'
 
-type ExpenseRow = { vessel_id: string | null; amount: number }
-type IncomeRow = { vessel_id: string | null; amount: number }
-type FuelCostRow = { vessel_id: string; cost: number | null }
+type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
+type IncomeRow = { vessel_id: string | null; amount: number; income_date: string }
+type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
 
 export default function VesselsPage() {
   const supabase = createClient()
@@ -18,6 +20,9 @@ export default function VesselsPage() {
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  const [from, setFrom] = useState(() => currentMonthRange().from)
+  const [to, setTo] = useState(() => currentMonthRange().to)
 
   useEffect(() => {
     load()
@@ -29,9 +34,9 @@ export default function VesselsPage() {
     try {
       const [vesselsRes, expensesRes, incomeRes, fuelRes] = await Promise.all([
         supabase.from('vessels').select('id, name, notes, created_at').order('name'),
-        supabase.from('expenses').select('vessel_id, amount'),
-        supabase.from('income_entries').select('vessel_id, amount'),
-        supabase.from('fuel_entry_cost').select('vessel_id, cost'),
+        supabase.from('expenses').select('vessel_id, amount, expense_date'),
+        supabase.from('income_entries').select('vessel_id, amount, income_date'),
+        supabase.from('fuel_entry_cost').select('vessel_id, cost, filled_at'),
       ])
       if (vesselsRes.error) throw vesselsRes.error
       if (expensesRes.error) throw expensesRes.error
@@ -48,29 +53,34 @@ export default function VesselsPage() {
     }
   }
 
+  const inRange = (date: string) => (!from || date >= from) && (!to || date <= to)
+
   const totals = useMemo(() => {
     const map = new Map<string, { expense: number; income: number }>()
     for (const v of vessels) map.set(v.id, { expense: 0, income: 0 })
     for (const e of expenses) {
-      if (!e.vessel_id) continue
+      if (!e.vessel_id || !inRange(e.expense_date)) continue
       const t = map.get(e.vessel_id)
       if (t) t.expense += e.amount
     }
     for (const f of fuelCosts) {
+      if (!inRange(f.filled_at)) continue
       const t = map.get(f.vessel_id)
       if (t && f.cost != null) t.expense += f.cost
     }
     for (const i of income) {
-      if (!i.vessel_id) continue
+      if (!i.vessel_id || !inRange(i.income_date)) continue
       const t = map.get(i.vessel_id)
       if (t) t.income += i.amount
     }
     return map
-  }, [vessels, expenses, income, fuelCosts])
+  }, [vessels, expenses, income, fuelCosts, from, to])
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
       <h1 className="text-2xl font-bold">Vessels</h1>
+
+      <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
 
       {loading ? (
         <p className="text-gray-400 dark:text-gray-500">Loading…</p>
