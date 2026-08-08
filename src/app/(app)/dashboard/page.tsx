@@ -89,11 +89,17 @@ export default function DashboardPage() {
   const totalExpense = manualExpenseTotal + fuelExpenseTotal
   const net = totalIncome - totalExpense
 
+  type VesselTotal = { id: string; name: string; income: number; expense: number; isUnassigned: boolean }
+
   const perVessel = useMemo(() => {
     const map = new Map<string, { expense: number; income: number }>()
     for (const v of vessels) map.set(v.id, { expense: 0, income: 0 })
+    const unassigned = { expense: 0, income: 0 }
     for (const e of filteredExpenses) {
-      if (!e.vessel_id) continue
+      if (!e.vessel_id) {
+        unassigned.expense += e.amount
+        continue
+      }
       const t = map.get(e.vessel_id)
       if (t) t.expense += e.amount
     }
@@ -102,13 +108,23 @@ export default function DashboardPage() {
       if (t) t.expense += f.cost ?? 0
     }
     for (const i of filteredIncome) {
-      if (!i.vessel_id) continue
+      if (!i.vessel_id) {
+        unassigned.income += i.amount
+        continue
+      }
       const t = map.get(i.vessel_id)
       if (t) t.income += i.amount
     }
-    return vessels
-      .map((v) => ({ vessel: v, ...map.get(v.id)! }))
-      .sort((a, b) => b.income - b.expense - (a.income - a.expense))
+    const rows: VesselTotal[] = vessels.map((v) => ({
+      id: v.id,
+      name: v.name,
+      isUnassigned: false,
+      ...map.get(v.id)!,
+    }))
+    if (unassigned.income !== 0 || unassigned.expense !== 0) {
+      rows.push({ id: '__unassigned', name: 'Unassigned', isUnassigned: true, ...unassigned })
+    }
+    return rows.sort((a, b) => b.income - b.expense - (a.income - a.expense))
   }, [vessels, filteredExpenses, filteredFuel, filteredIncome])
 
   const monthly = useMemo(() => {
@@ -187,20 +203,33 @@ export default function DashboardPage() {
               <p className="text-sm text-gray-400 dark:text-gray-500">No vessels yet.</p>
             ) : (
               <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-gray-100 dark:divide-neutral-800 overflow-hidden">
-                {perVessel.map(({ vessel, income, expense }) => (
-                  <Link
-                    key={vessel.id}
-                    href={`/vessels/${vessel.id}`}
-                    className="flex items-center justify-between px-4 py-3 text-sm transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60 active:bg-gray-100 dark:active:bg-neutral-800"
-                  >
-                    <p className="font-medium">{vessel.name}</p>
-                    <span
-                      className={`font-medium ${income - expense >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
+                {perVessel.map(({ id, name, income, expense, isUnassigned }) => {
+                  const row = (
+                    <>
+                      <p className={`font-medium ${isUnassigned ? 'text-gray-500 dark:text-gray-400 italic' : ''}`}>
+                        {name}
+                      </p>
+                      <span
+                        className={`font-medium ${income - expense >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
+                      >
+                        {formatMVR(income - expense)}
+                      </span>
+                    </>
+                  )
+                  return isUnassigned ? (
+                    <div key={id} className="flex items-center justify-between px-4 py-3 text-sm">
+                      {row}
+                    </div>
+                  ) : (
+                    <Link
+                      key={id}
+                      href={`/vessels/${id}`}
+                      className="flex items-center justify-between px-4 py-3 text-sm transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60 active:bg-gray-100 dark:active:bg-neutral-800"
                     >
-                      {formatMVR(income - expense)}
-                    </span>
-                  </Link>
-                ))}
+                      {row}
+                    </Link>
+                  )
+                })}
               </div>
             )}
           </section>

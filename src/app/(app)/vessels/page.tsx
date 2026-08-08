@@ -58,8 +58,13 @@ export default function VesselsPage() {
   const totals = useMemo(() => {
     const map = new Map<string, { expense: number; income: number }>()
     for (const v of vessels) map.set(v.id, { expense: 0, income: 0 })
+    const unassigned = { expense: 0, income: 0 }
     for (const e of expenses) {
-      if (!e.vessel_id || !inRange(e.expense_date)) continue
+      if (!inRange(e.expense_date)) continue
+      if (!e.vessel_id) {
+        unassigned.expense += e.amount
+        continue
+      }
       const t = map.get(e.vessel_id)
       if (t) t.expense += e.amount
     }
@@ -69,11 +74,15 @@ export default function VesselsPage() {
       if (t && f.cost != null) t.expense += f.cost
     }
     for (const i of income) {
-      if (!i.vessel_id || !inRange(i.income_date)) continue
+      if (!inRange(i.income_date)) continue
+      if (!i.vessel_id) {
+        unassigned.income += i.amount
+        continue
+      }
       const t = map.get(i.vessel_id)
       if (t) t.income += i.amount
     }
-    return map
+    return { map, unassigned }
   }, [vessels, expenses, income, fuelCosts, from, to])
 
   return (
@@ -101,7 +110,7 @@ export default function VesselsPage() {
       ) : (
         <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-gray-100 dark:divide-neutral-800 overflow-hidden">
           {vessels.map((v) => {
-            const t = totals.get(v.id) ?? { expense: 0, income: 0 }
+            const t = totals.map.get(v.id) ?? { expense: 0, income: 0 }
             const net = t.income - t.expense
             return (
               <Link
@@ -123,6 +132,25 @@ export default function VesselsPage() {
               </Link>
             )
           })}
+          {(totals.unassigned.income !== 0 || totals.unassigned.expense !== 0) && (
+            <div className="flex items-center justify-between px-4 py-3">
+              <div>
+                <p className="font-medium text-gray-500 dark:text-gray-400 italic">Unassigned</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500">
+                  {formatMVR(totals.unassigned.income)} in · {formatMVR(totals.unassigned.expense)} out
+                </p>
+              </div>
+              <span
+                className={`font-medium ${
+                  totals.unassigned.income - totals.unassigned.expense >= 0
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-red-600 dark:text-red-400'
+                }`}
+              >
+                {formatMVR(totals.unassigned.income - totals.unassigned.expense)}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </main>
