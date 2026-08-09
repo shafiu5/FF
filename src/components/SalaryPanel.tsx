@@ -574,7 +574,7 @@ export default function SalaryPanel() {
                     </p>
                     <p className="text-xs text-gray-400 dark:text-gray-500">
                       {vessels.find((v) => v.id === emp.default_vessel_id)?.name ?? 'Unassigned'} ·{' '}
-                      {formatMVR(emp.basic_salary)} basic
+                      {formatMVR(emp.basic_salary + emp.food_allowance + emp.phone_allowance)} salary
                     </p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
