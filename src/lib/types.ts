@@ -77,3 +77,49 @@ export type OmitRule = {
   label: string
   created_at: string
 }
+
+export type Employee = {
+  id: string
+  name: string
+  role: string
+  default_vessel_id: string | null
+  basic_salary: number
+  food_allowance: number
+  phone_allowance: number
+  active: boolean
+  notes: string
+  created_at: string
+}
+
+export type SalaryRunStatus = 'draft' | 'confirmed'
+
+export type SalaryRun = {
+  id: string
+  period_month: string
+  status: SalaryRunStatus
+  confirmed_at: string | null
+  created_at: string
+}
+
+export type SalarySlip = {
+  id: string
+  salary_run_id: string
+  employee_id: string
+  vessel_id: string | null
+  basic_salary: number
+  food_allowance: number
+  phone_allowance: number
+  bonus: number
+  bonus_notes: string
+  expense_id: string | null
+  created_at: string
+}
+
+export type SalarySlipTrip = {
+  id: string
+  salary_slip_id: string
+  trip_date: string
+  description: string
+  amount: number
+  created_at: string
+}

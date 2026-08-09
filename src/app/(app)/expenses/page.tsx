@@ -8,6 +8,7 @@ import { EXPENSE_CATEGORY_SUGGESTIONS } from '@/lib/types'
 import DateRangeFilter from '@/components/DateRangeFilter'
 import { computeIncomeTaxBreakdown, extractTax } from '@/lib/tax'
 import { currentMonthRange } from '@/lib/dateRange'
+import SalaryPanel from '@/components/SalaryPanel'
 
 type VesselOption = { id: string; name: string }
 type ExpenseRow = {
@@ -51,7 +52,7 @@ type IncomeRow = {
 
 export default function ExpensesPage() {
   const supabase = createClient()
-  const [tab, setTab] = useState<'expenses' | 'tax'>('expenses')
+  const [tab, setTab] = useState<'expenses' | 'salary' | 'tax'>('expenses')
 
   const [vessels, setVessels] = useState<VesselOption[]>([])
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
@@ -381,6 +382,17 @@ export default function ExpensesPage() {
         </button>
         <button
           type="button"
+          onClick={() => setTab('salary')}
+          className={`flex-1 py-2 text-sm font-medium transition-colors ${
+            tab === 'salary'
+              ? 'bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white'
+              : 'bg-white dark:bg-neutral-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-neutral-800 active:bg-gray-100 dark:active:bg-neutral-700'
+          }`}
+        >
+          Salary
+        </button>
+        <button
+          type="button"
           onClick={() => setTab('tax')}
           className={`flex-1 py-2 text-sm font-medium transition-colors ${
             tab === 'tax'
@@ -391,6 +403,8 @@ export default function ExpensesPage() {
           Tax management
         </button>
       </div>
+
+      {tab === 'salary' && <SalaryPanel />}
 
       {tab === 'expenses' && showAdd && (
         <form
@@ -492,7 +506,7 @@ export default function ExpensesPage() {
         </form>
       )}
 
-      <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+      {tab !== 'salary' && <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />}
 
       {tab === 'expenses' &&
         (loading ? (
