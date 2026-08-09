@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Plus, X, Trash2, Paperclip } from 'lucide-react'
+import { Plus, X, Trash2, Paperclip, Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
 import { EXPENSE_CATEGORY_SUGGESTIONS } from '@/lib/types'
@@ -79,6 +79,17 @@ export default function ExpensesPage() {
   const [to, setTo] = useState(() => currentMonthRange().to)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editVesselId, setEditVesselId] = useState('')
+  const [editCategory, setEditCategory] = useState('')
+  const [editAmount, setEditAmount] = useState('')
+  const [editHasTax, setEditHasTax] = useState(false)
+  const [editDate, setEditDate] = useState('')
+  const [editVendor, setEditVendor] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   const [recordAsExpense, setRecordAsExpense] = useState(false)
   const [savingTaxExpense, setSavingTaxExpense] = useState(false)
@@ -203,7 +214,52 @@ export default function ExpensesPage() {
     if (!error) setExpenses((prev) => prev.filter((e) => e.id !== id))
   }
 
+  function startEdit(row: ExpenseRow) {
+    setEditingId(row.id)
+    setEditVesselId(row.vessel_id ?? '')
+    setEditCategory(row.category)
+    setEditAmount(String(row.amount))
+    setEditHasTax(row.has_tax)
+    setEditDate(row.expense_date)
+    setEditVendor(row.vendor)
+    setEditNotes(row.notes)
+    setEditError(null)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditError(null)
+  }
+
+  async function saveEdit(id: string) {
+    setSavingEdit(true)
+    setEditError(null)
+    const amountValue = Number(editAmount)
+    const { error } = await supabase
+      .from('expenses')
+      .update({
+        vessel_id: editVesselId || null,
+        category: editCategory.trim() || 'Other',
+        amount: amountValue,
+        has_tax: editHasTax,
+        tax_percent: editHasTax ? defaultTaxPercent : null,
+        tax_amount: editHasTax ? extractTax(amountValue, defaultTaxPercent) : null,
+        expense_date: editDate,
+        vendor: editVendor,
+        notes: editNotes,
+      })
+      .eq('id', id)
+    setSavingEdit(false)
+    if (error) {
+      setEditError(error.message)
+      return
+    }
+    setEditingId(null)
+    load()
+  }
+
   const previewTaxAmount = hasTax ? extractTax(Number(amount) || 0, defaultTaxPercent) : 0
+  const editPreviewTaxAmount = editHasTax ? extractTax(Number(editAmount) || 0, defaultTaxPercent) : 0
 
   const vesselNames = useMemo(() => new Map(vessels.map((v) => [v.id, v.name])), [vessels])
 
@@ -460,48 +516,165 @@ export default function ExpensesPage() {
             </p>
             <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-gray-100 dark:divide-neutral-800 overflow-hidden">
               {filtered.map((e) => (
-                <div
-                  key={`${e.kind}-${e.id}`}
-                  className="flex items-center justify-between px-4 py-3 text-sm gap-2 transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60 active:bg-gray-100 dark:active:bg-neutral-800"
-                >
-                  <div className="min-w-0">
-                    <p className="font-medium flex items-center gap-1.5">
-                      {e.category}
-                      {e.vendor && <span className="text-gray-400 dark:text-gray-500"> · {e.vendor}</span>}
-                      {e.kind === 'fuel' && (
-                        <span className="text-xs font-normal text-sky-600 dark:text-sky-400 border border-sky-300 dark:border-sky-800 rounded px-1.5 py-0.5">
-                          From fuel-tracker
-                        </span>
+                <div key={`${e.kind}-${e.id}`}>
+                  <div className="flex items-center justify-between px-4 py-3 text-sm gap-2 transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60 active:bg-gray-100 dark:active:bg-neutral-800">
+                    <div className="min-w-0">
+                      <p className="font-medium flex items-center gap-1.5">
+                        {e.category}
+                        {e.vendor && <span className="text-gray-400 dark:text-gray-500"> · {e.vendor}</span>}
+                        {e.kind === 'fuel' && (
+                          <span className="text-xs font-normal text-sky-600 dark:text-sky-400 border border-sky-300 dark:border-sky-800 rounded px-1.5 py-0.5">
+                            From fuel-tracker
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500">
+                        {e.date} · {e.vesselName}
+                        {e.taxAmount != null && ` · incl. ${formatMVR(e.taxAmount)} tax`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="font-medium">{formatMVR(e.amount)}</span>
+                      {e.receiptPath && (
+                        <button
+                          onClick={() => viewReceipt(e.receiptPath!, e.id)}
+                          disabled={viewingReceiptId === e.id}
+                          className="text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-sky-50 dark:hover:bg-sky-950/30 active:bg-sky-100 dark:active:bg-sky-950/50 disabled:opacity-50"
+                          aria-label="View receipt"
+                        >
+                          <Paperclip size={16} strokeWidth={1.75} />
+                        </button>
                       )}
-                    </p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500">
-                      {e.date} · {e.vesselName}
-                      {e.taxAmount != null && ` · incl. ${formatMVR(e.taxAmount)} tax`}
-                    </p>
+                      {e.kind === 'manual' && (
+                        <>
+                          <button
+                            onClick={() => {
+                              if (editingId === e.id) {
+                                cancelEdit()
+                                return
+                              }
+                              const row = expenses.find((x) => x.id === e.id)
+                              if (row) startEdit(row)
+                            }}
+                            className="text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-sky-50 dark:hover:bg-sky-950/30 active:bg-sky-100 dark:active:bg-sky-950/50"
+                            aria-label="Edit"
+                          >
+                            <Pencil size={16} strokeWidth={1.75} />
+                          </button>
+                          <button
+                            onClick={() => deleteExpense(e.id)}
+                            disabled={deletingId === e.id}
+                            className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-red-50 dark:hover:bg-red-950/30 active:bg-red-100 dark:active:bg-red-950/50 disabled:opacity-50"
+                            aria-label="Delete"
+                          >
+                            <Trash2 size={16} strokeWidth={1.75} />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="font-medium">{formatMVR(e.amount)}</span>
-                    {e.receiptPath && (
-                      <button
-                        onClick={() => viewReceipt(e.receiptPath!, e.id)}
-                        disabled={viewingReceiptId === e.id}
-                        className="text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-sky-50 dark:hover:bg-sky-950/30 active:bg-sky-100 dark:active:bg-sky-950/50 disabled:opacity-50"
-                        aria-label="View receipt"
+                  {editingId === e.id && (
+                    <form
+                      onSubmit={(ev) => {
+                        ev.preventDefault()
+                        saveEdit(e.id)
+                      }}
+                      className="px-4 pb-4 pl-10 space-y-2"
+                    >
+                      <select
+                        value={editVesselId}
+                        onChange={(ev) => setEditVesselId(ev.target.value)}
+                        className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-sm"
                       >
-                        <Paperclip size={16} strokeWidth={1.75} />
-                      </button>
-                    )}
-                    {e.kind === 'manual' && (
-                      <button
-                        onClick={() => deleteExpense(e.id)}
-                        disabled={deletingId === e.id}
-                        className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-red-50 dark:hover:bg-red-950/30 active:bg-red-100 dark:active:bg-red-950/50 disabled:opacity-50"
-                        aria-label="Delete"
-                      >
-                        <Trash2 size={16} strokeWidth={1.75} />
-                      </button>
-                    )}
-                  </div>
+                        <option value="">Unassigned (fleet-wide)</option>
+                        {vessels.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div>
+                        <input
+                          required
+                          list="edit-category-suggestions"
+                          value={editCategory}
+                          onChange={(ev) => setEditCategory(ev.target.value)}
+                          placeholder="Category"
+                          className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-sm"
+                        />
+                        <datalist id="edit-category-suggestions">
+                          {EXPENSE_CATEGORY_SUGGESTIONS.map((c) => (
+                            <option key={c} value={c} />
+                          ))}
+                        </datalist>
+                      </div>
+                      <input
+                        required
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editAmount}
+                        onChange={(ev) => setEditAmount(ev.target.value)}
+                        placeholder="Amount (MVR)"
+                        className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-sm"
+                      />
+                      <div>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={editHasTax}
+                            onChange={(ev) => setEditHasTax(ev.target.checked)}
+                            className="rounded border-gray-300 dark:border-neutral-700"
+                          />
+                          This expense has tax
+                        </label>
+                        {editHasTax && (
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            {defaultTaxPercent}% tax ={' '}
+                            <span className="font-medium text-gray-700 dark:text-gray-300">
+                              {formatMVR(editPreviewTaxAmount)}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                      <input
+                        required
+                        type="date"
+                        value={editDate}
+                        onChange={(ev) => setEditDate(ev.target.value)}
+                        className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-sm"
+                      />
+                      <input
+                        value={editVendor}
+                        onChange={(ev) => setEditVendor(ev.target.value)}
+                        placeholder="Vendor (optional)"
+                        className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-sm"
+                      />
+                      <textarea
+                        value={editNotes}
+                        onChange={(ev) => setEditNotes(ev.target.value)}
+                        placeholder="Notes (optional)"
+                        rows={2}
+                        className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-sm"
+                      />
+                      {editError && <p className="text-xs text-red-600 dark:text-red-400">{editError}</p>}
+                      <div className="flex gap-2">
+                        <button
+                          disabled={savingEdit}
+                          className="flex-1 rounded-lg bg-sky-600 text-white py-1.5 text-sm font-medium transition-colors hover:bg-sky-700 active:bg-sky-800 disabled:opacity-50"
+                        >
+                          {savingEdit ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEdit}
+                          className="rounded-lg border border-gray-300 dark:border-neutral-700 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  )}
                 </div>
               ))}
             </div>
