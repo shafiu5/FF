@@ -130,5 +130,28 @@ export type SalarySlipDeduction = {
   deduction_date: string
   description: string
   amount: number
+  loan_id: string | null
   created_at: string
+}
+
+export type LoanStatus = 'active' | 'closed'
+
+export type EmployeeLoan = {
+  id: string
+  employee_id: string
+  principal_amount: number
+  monthly_installment: number
+  notes: string
+  status: LoanStatus
+  created_at: string
+}
+
+export type LoanBalance = {
+  loan_id: string
+  employee_id: string
+  principal_amount: number
+  monthly_installment: number
+  status: LoanStatus
+  paid_amount: number
+  remaining_amount: number
 }

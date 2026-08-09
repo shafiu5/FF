@@ -4,10 +4,18 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Plus, X, Trash2, Pencil, ChevronDown, ChevronRight, ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
-import type { Employee, SalaryRun, SalarySlip, SalarySlipTrip, SalarySlipDeduction } from '@/lib/types'
+import type {
+  Employee,
+  SalaryRun,
+  SalarySlip,
+  SalarySlipTrip,
+  SalarySlipDeduction,
+  EmployeeLoan,
+  LoanBalance,
+} from '@/lib/types'
 
 type VesselOption = { id: string; name: string }
-type View = 'employees' | 'runs' | 'run'
+type View = 'employees' | 'runs' | 'run' | 'loans'
 
 function monthLabel(periodMonth: string): string {
   const [y, m] = periodMonth.split('-').map(Number)
@@ -34,6 +42,8 @@ export default function SalaryPanel() {
   const [vessels, setVessels] = useState<VesselOption[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [runs, setRuns] = useState<SalaryRun[]>([])
+  const [loans, setLoans] = useState<EmployeeLoan[]>([])
+  const [loanBalances, setLoanBalances] = useState<LoanBalance[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -41,17 +51,23 @@ export default function SalaryPanel() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [vesselsRes, employeesRes, runsRes] = await Promise.all([
+      const [vesselsRes, employeesRes, runsRes, loansRes, loanBalancesRes] = await Promise.all([
         supabase.from('vessels').select('id, name').order('name'),
         supabase.from('employees').select('*').order('name'),
         supabase.from('salary_runs').select('*').order('period_month', { ascending: false }),
+        supabase.from('employee_loans').select('*').order('created_at', { ascending: false }),
+        supabase.from('loan_balances').select('*'),
       ])
       if (vesselsRes.error) throw vesselsRes.error
       if (employeesRes.error) throw employeesRes.error
       if (runsRes.error) throw runsRes.error
+      if (loansRes.error) throw loansRes.error
+      if (loanBalancesRes.error) throw loanBalancesRes.error
       setVessels((vesselsRes.data as VesselOption[]) ?? [])
       setEmployees((employeesRes.data as Employee[]) ?? [])
       setRuns((runsRes.data as SalaryRun[]) ?? [])
+      setLoans((loansRes.data as EmployeeLoan[]) ?? [])
+      setLoanBalances((loanBalancesRes.data as LoanBalance[]) ?? [])
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load salary data.')
     } finally {
@@ -168,6 +184,84 @@ export default function SalaryPanel() {
   }
 
   // ---------------------------------------------------------------------
+  // Loans
+  // ---------------------------------------------------------------------
+  const [showAddLoan, setShowAddLoan] = useState(false)
+  const [editingLoanId, setEditingLoanId] = useState<string | null>(null)
+  const [loanEmployeeId, setLoanEmployeeId] = useState('')
+  const [loanPrincipal, setLoanPrincipal] = useState('')
+  const [loanInstallment, setLoanInstallment] = useState('')
+  const [loanNotes, setLoanNotes] = useState('')
+  const [loanStatus, setLoanStatus] = useState<'active' | 'closed'>('active')
+  const [savingLoan, setSavingLoan] = useState(false)
+  const [loanError, setLoanError] = useState<string | null>(null)
+  const [deletingLoanId, setDeletingLoanId] = useState<string | null>(null)
+  const [loanListError, setLoanListError] = useState<string | null>(null)
+
+  function resetLoanForm() {
+    setLoanEmployeeId('')
+    setLoanPrincipal('')
+    setLoanInstallment('')
+    setLoanNotes('')
+    setLoanStatus('active')
+  }
+
+  function startAddLoan() {
+    resetLoanForm()
+    setEditingLoanId(null)
+    setLoanError(null)
+    setShowAddLoan(true)
+  }
+
+  function startEditLoan(loan: EmployeeLoan) {
+    setLoanEmployeeId(loan.employee_id)
+    setLoanPrincipal(String(loan.principal_amount))
+    setLoanInstallment(String(loan.monthly_installment))
+    setLoanNotes(loan.notes)
+    setLoanStatus(loan.status)
+    setEditingLoanId(loan.id)
+    setLoanError(null)
+    setShowAddLoan(true)
+  }
+
+  async function saveLoan(e: FormEvent) {
+    e.preventDefault()
+    setSavingLoan(true)
+    setLoanError(null)
+    const payload = {
+      employee_id: loanEmployeeId,
+      principal_amount: Number(loanPrincipal) || 0,
+      monthly_installment: Number(loanInstallment) || 0,
+      notes: loanNotes,
+      status: loanStatus,
+    }
+    const { error } = editingLoanId
+      ? await supabase.from('employee_loans').update(payload).eq('id', editingLoanId)
+      : await supabase.from('employee_loans').insert(payload)
+    setSavingLoan(false)
+    if (error) {
+      setLoanError(error.message)
+      return
+    }
+    setShowAddLoan(false)
+    setEditingLoanId(null)
+    resetLoanForm()
+    loadAll()
+  }
+
+  async function deleteLoan(id: string) {
+    setDeletingLoanId(id)
+    setLoanListError(null)
+    const { error } = await supabase.from('employee_loans').delete().eq('id', id)
+    setDeletingLoanId(null)
+    if (error) {
+      setLoanListError(error.message)
+      return
+    }
+    loadAll()
+  }
+
+  // ---------------------------------------------------------------------
   // Runs
   // ---------------------------------------------------------------------
   const [newRunMonth, setNewRunMonth] = useState(() => new Date().toISOString().slice(0, 7))
@@ -221,13 +315,49 @@ export default function SalaryPanel() {
         food_allowance: emp.food_allowance,
         phone_allowance: emp.phone_allowance,
       }))
-      const { error: slipsError } = await supabase.from('salary_slips').insert(slipsPayload)
+      const { data: newSlips, error: slipsError } = await supabase
+        .from('salary_slips')
+        .insert(slipsPayload)
+        .select('id, employee_id')
       if (slipsError) {
         // Don't leave an empty orphaned run behind if the slips failed.
         await supabase.from('salary_runs').delete().eq('id', run.id)
         setCreatingRun(false)
         setRunsError(`Couldn't create the employee slips, so nothing was created: ${slipsError.message}`)
         return
+      }
+
+      // Auto-add this month's installment for any employee with an active
+      // loan still owing a balance, capped so it never overshoots what's
+      // left. Skipping a month for someone is just deleting this row from
+      // their slip before confirming.
+      const loanDeductionsPayload = (newSlips ?? []).flatMap((slip) => {
+        const loan = loans.find((l) => l.employee_id === slip.employee_id && l.status === 'active')
+        if (!loan) return []
+        const balance = loanBalances.find((b) => b.loan_id === loan.id)
+        const remaining = balance ? balance.remaining_amount : loan.principal_amount
+        if (remaining <= 0) return []
+        const amount = Math.min(loan.monthly_installment, remaining)
+        if (amount <= 0) return []
+        return [
+          {
+            salary_slip_id: slip.id,
+            deduction_date: periodMonth,
+            description: 'Loan repayment',
+            amount,
+            loan_id: loan.id,
+          },
+        ]
+      })
+      if (loanDeductionsPayload.length > 0) {
+        const { error: loanDeductionsError } = await supabase
+          .from('salary_slip_deductions')
+          .insert(loanDeductionsPayload)
+        if (loanDeductionsError) {
+          setRunsError(
+            `Run created, but couldn't auto-add loan installments: ${loanDeductionsError.message}. You can add them manually on each slip.`
+          )
+        }
       }
     }
     setCreatingRun(false)
@@ -531,6 +661,9 @@ export default function SalaryPanel() {
           <button type="button" onClick={() => setView('employees')} className={tabButtonClass(view === 'employees')}>
             Employees
           </button>
+          <button type="button" onClick={() => setView('loans')} className={tabButtonClass(view === 'loans')}>
+            Loans
+          </button>
         </div>
       )}
 
@@ -678,6 +811,148 @@ export default function SalaryPanel() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === 'loans' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">Loans</h2>
+            <button
+              onClick={() => (showAddLoan ? setShowAddLoan(false) : startAddLoan())}
+              className="flex items-center gap-1.5 rounded-lg bg-sky-600 text-white px-4 py-2 text-sm font-medium transition-colors hover:bg-sky-700 active:bg-sky-800"
+            >
+              {showAddLoan ? <X size={16} strokeWidth={1.75} /> : <Plus size={16} strokeWidth={1.75} />}
+              {showAddLoan ? 'Cancel' : 'Add loan'}
+            </button>
+          </div>
+
+          {showAddLoan && (
+            <form
+              onSubmit={saveLoan}
+              className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 space-y-3"
+            >
+              <select
+                required
+                value={loanEmployeeId}
+                onChange={(e) => setLoanEmployeeId(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2"
+              >
+                <option value="">Select employee…</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </option>
+                ))}
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  required
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={loanPrincipal}
+                  onChange={(e) => setLoanPrincipal(e.target.value)}
+                  placeholder="Principal amount"
+                  className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2"
+                />
+                <input
+                  required
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={loanInstallment}
+                  onChange={(e) => setLoanInstallment(e.target.value)}
+                  placeholder="Monthly installment"
+                  className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2"
+                />
+              </div>
+              <textarea
+                value={loanNotes}
+                onChange={(e) => setLoanNotes(e.target.value)}
+                placeholder="Notes (optional)"
+                rows={2}
+                className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2"
+              />
+              {editingLoanId && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={loanStatus === 'active'}
+                    onChange={(e) => setLoanStatus(e.target.checked ? 'active' : 'closed')}
+                    className="rounded border-gray-300 dark:border-neutral-700"
+                  />
+                  Active (auto-deducted on new salary runs)
+                </label>
+              )}
+              {loanError && <p className="text-sm text-red-600 dark:text-red-400">{loanError}</p>}
+              <button
+                disabled={savingLoan}
+                className="w-full rounded-lg bg-sky-600 text-white py-2 font-medium transition-colors hover:bg-sky-700 active:bg-sky-800 disabled:opacity-50 disabled:hover:bg-sky-600"
+              >
+                {savingLoan ? 'Saving…' : editingLoanId ? 'Save changes' : 'Add loan'}
+              </button>
+            </form>
+          )}
+
+          {loanListError && <p className="text-sm text-red-600 dark:text-red-400">{loanListError}</p>}
+
+          {loans.length === 0 ? (
+            <p className="text-sm text-gray-400 dark:text-gray-500">No loans yet.</p>
+          ) : (
+            <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-gray-100 dark:divide-neutral-800 overflow-hidden">
+              {loans.map((loan) => {
+                const employee = employees.find((e) => e.id === loan.employee_id)
+                const balance = loanBalances.find((b) => b.loan_id === loan.id)
+                const remaining = balance ? balance.remaining_amount : loan.principal_amount
+                const paidOff = remaining <= 0
+                return (
+                  <div
+                    key={loan.id}
+                    className="flex items-center justify-between px-4 py-3 text-sm gap-2 transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium flex items-center gap-1.5 flex-wrap">
+                        {employee?.name ?? 'Employee'}
+                        <span
+                          className={`text-xs font-normal rounded px-1.5 py-0.5 border ${
+                            paidOff
+                              ? 'text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800'
+                              : loan.status === 'active'
+                                ? 'text-gray-500 dark:text-gray-400 border-gray-300 dark:border-neutral-700'
+                                : 'text-gray-400 dark:text-gray-500 border-gray-300 dark:border-neutral-700'
+                          }`}
+                        >
+                          {paidOff ? 'Paid off' : loan.status === 'active' ? 'Active' : 'Closed'}
+                        </span>
+                      </p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500">
+                        {formatMVR(Math.max(remaining, 0))} remaining of {formatMVR(loan.principal_amount)} ·{' '}
+                        {formatMVR(loan.monthly_installment)}/month
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <button
+                        onClick={() => startEditLoan(loan)}
+                        className="text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-sky-50 dark:hover:bg-sky-950/30 active:bg-sky-100 dark:active:bg-sky-950/50"
+                        aria-label="Edit"
+                      >
+                        <Pencil size={16} strokeWidth={1.75} />
+                      </button>
+                      <button
+                        onClick={() => deleteLoan(loan.id)}
+                        disabled={deletingLoanId === loan.id}
+                        className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-red-50 dark:hover:bg-red-950/30 active:bg-red-100 dark:active:bg-red-950/50 disabled:opacity-50"
+                        aria-label="Delete"
+                      >
+                        <Trash2 size={16} strokeWidth={1.75} />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -982,6 +1257,9 @@ export default function SalaryPanel() {
                                       >
                                         <span className="text-gray-600 dark:text-gray-300">
                                           {d.deduction_date} · {d.description || 'Deduction'}
+                                          {d.loan_id && (
+                                            <span className="text-gray-400 dark:text-gray-500"> · loan</span>
+                                          )}
                                         </span>
                                         <span className="flex items-center gap-2">
                                           <span className="text-red-600 dark:text-red-400">
