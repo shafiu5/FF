@@ -53,6 +53,7 @@ export default function IncomePage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editVesselId, setEditVesselId] = useState('')
   const [editDate, setEditDate] = useState('')
+  const [editIsTaxFree, setEditIsTaxFree] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
 
@@ -139,6 +140,7 @@ export default function IncomePage() {
     setEditingId(entry.id)
     setEditVesselId(entry.vessel_id ?? '')
     setEditDate(entry.income_date)
+    setEditIsTaxFree(entry.is_tax_free)
     setEditError(null)
   }
 
@@ -147,13 +149,15 @@ export default function IncomePage() {
     setEditError(null)
   }
 
-  async function saveEdit(id: string) {
+  async function saveEdit(id: string, hasLines: boolean) {
     setSavingEdit(true)
     setEditError(null)
-    const { error } = await supabase
-      .from('income_entries')
-      .update({ vessel_id: editVesselId || null, income_date: editDate })
-      .eq('id', id)
+    const update: { vessel_id: string | null; income_date: string; is_tax_free?: boolean } = {
+      vessel_id: editVesselId || null,
+      income_date: editDate,
+    }
+    if (!hasLines) update.is_tax_free = editIsTaxFree
+    const { error } = await supabase.from('income_entries').update(update).eq('id', id)
     setSavingEdit(false)
     if (error) {
       setEditError(error.message)
@@ -421,8 +425,19 @@ export default function IncomePage() {
                           ))}
                         </select>
                       </div>
+                      {lineCount === 0 && (
+                        <label className="flex items-center gap-1.5 text-sm pb-1.5">
+                          <input
+                            type="checkbox"
+                            checked={editIsTaxFree}
+                            onChange={(e) => setEditIsTaxFree(e.target.checked)}
+                            className="rounded border-gray-300 dark:border-neutral-700"
+                          />
+                          Tax-free
+                        </label>
+                      )}
                       <button
-                        onClick={() => saveEdit(i.id)}
+                        onClick={() => saveEdit(i.id, lineCount > 0)}
                         disabled={savingEdit}
                         className="rounded-lg bg-sky-600 text-white px-3 py-1.5 text-sm font-medium transition-colors hover:bg-sky-700 active:bg-sky-800 disabled:opacity-50"
                       >
@@ -435,6 +450,12 @@ export default function IncomePage() {
                         Cancel
                       </button>
                       {editError && <p className="w-full text-xs text-red-600 dark:text-red-400">{editError}</p>}
+                      {lineCount > 0 && (
+                        <p className="w-full text-[11px] text-gray-400 dark:text-gray-500">
+                          Tax-free status here comes from its {lineCount} passenger lines (expand the entry above
+                          to view them), not this entry-level flag — re-import to fix individual passengers.
+                        </p>
+                      )}
                     </div>
                   )}
                   {expanded && (
