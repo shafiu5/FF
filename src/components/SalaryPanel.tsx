@@ -81,6 +81,16 @@ export default function SalaryPanel() {
   const [deletingEmployeeId, setDeletingEmployeeId] = useState<string | null>(null)
   const [employeeListError, setEmployeeListError] = useState<string | null>(null)
 
+  const employeesBySalaryDesc = useMemo(
+    () =>
+      [...employees].sort(
+        (a, b) =>
+          b.basic_salary + b.food_allowance + b.phone_allowance -
+          (a.basic_salary + a.food_allowance + a.phone_allowance)
+      ),
+    [employees]
+  )
+
   function resetEmployeeForm() {
     setEmpName('')
     setEmpRole('')
@@ -557,7 +567,7 @@ export default function SalaryPanel() {
             <p className="text-sm text-gray-400 dark:text-gray-500">No employees yet.</p>
           ) : (
             <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-gray-100 dark:divide-neutral-800 overflow-hidden">
-              {employees.map((emp) => (
+              {employeesBySalaryDesc.map((emp) => (
                 <div
                   key={emp.id}
                   className="flex items-center justify-between px-4 py-3 text-sm gap-2 transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60"
