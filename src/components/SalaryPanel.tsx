@@ -183,14 +183,32 @@ export default function SalaryPanel() {
   async function createRun() {
     setCreatingRun(true)
     setRunsError(null)
+    const periodMonth = `${newRunMonth}-01`
+    const existing = runs.find((r) => r.period_month === periodMonth)
+    if (existing) {
+      setCreatingRun(false)
+      openRun(existing.id)
+      return
+    }
     const { data: run, error } = await supabase
       .from('salary_runs')
-      .insert({ period_month: `${newRunMonth}-01` })
+      .insert({ period_month: periodMonth })
       .select('id')
       .single()
     if (error || !run) {
       setCreatingRun(false)
-      setRunsError(error?.message ?? 'Failed to create the run.')
+      if (error?.message.includes('salary_runs_period_month_key')) {
+        setRunsError('A run already exists for this month — opening it instead.')
+        const { data: found } = await supabase
+          .from('salary_runs')
+          .select('id')
+          .eq('period_month', periodMonth)
+          .single()
+        await loadAll()
+        if (found) openRun(found.id)
+      } else {
+        setRunsError(error?.message ?? 'Failed to create the run.')
+      }
       return
     }
     const activeEmployees = employees.filter((e) => e.active)
