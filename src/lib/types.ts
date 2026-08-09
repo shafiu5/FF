@@ -123,3 +123,12 @@ export type SalarySlipTrip = {
   amount: number
   created_at: string
 }
+
+export type SalarySlipDeduction = {
+  id: string
+  salary_slip_id: string
+  deduction_date: string
+  description: string
+  amount: number
+  created_at: string
+}

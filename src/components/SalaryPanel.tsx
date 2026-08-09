@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Plus, X, Trash2, Pencil, ChevronDown, ChevronRight, ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
-import type { Employee, SalaryRun, SalarySlip, SalarySlipTrip } from '@/lib/types'
+import type { Employee, SalaryRun, SalarySlip, SalarySlipTrip, SalarySlipDeduction } from '@/lib/types'
 
 type VesselOption = { id: string; name: string }
 type View = 'employees' | 'runs' | 'run'
@@ -240,6 +240,7 @@ export default function SalaryPanel() {
   // ---------------------------------------------------------------------
   const [runSlips, setRunSlips] = useState<SalarySlip[]>([])
   const [runTrips, setRunTrips] = useState<Record<string, SalarySlipTrip[]>>({})
+  const [runDeductions, setRunDeductions] = useState<Record<string, SalarySlipDeduction[]>>({})
   const [loadingRun, setLoadingRun] = useState(false)
   const [runDetailError, setRunDetailError] = useState<string | null>(null)
 
@@ -258,19 +259,30 @@ export default function SalaryPanel() {
       const slipsData = (slipsRes.data as SalarySlip[]) ?? []
       setRunSlips(slipsData)
       if (slipsData.length > 0) {
-        const tripsRes = await supabase
-          .from('salary_slip_trips')
-          .select('*')
-          .in('salary_slip_id', slipsData.map((s) => s.id))
-          .order('trip_date')
+        const slipIds = slipsData.map((s) => s.id)
+        const [tripsRes, deductionsRes] = await Promise.all([
+          supabase.from('salary_slip_trips').select('*').in('salary_slip_id', slipIds).order('trip_date'),
+          supabase
+            .from('salary_slip_deductions')
+            .select('*')
+            .in('salary_slip_id', slipIds)
+            .order('deduction_date'),
+        ])
         if (tripsRes.error) throw tripsRes.error
-        const grouped: Record<string, SalarySlipTrip[]> = {}
+        if (deductionsRes.error) throw deductionsRes.error
+        const groupedTrips: Record<string, SalarySlipTrip[]> = {}
         for (const t of (tripsRes.data as SalarySlipTrip[]) ?? []) {
-          ;(grouped[t.salary_slip_id] ??= []).push(t)
+          ;(groupedTrips[t.salary_slip_id] ??= []).push(t)
         }
-        setRunTrips(grouped)
+        setRunTrips(groupedTrips)
+        const groupedDeductions: Record<string, SalarySlipDeduction[]> = {}
+        for (const d of (deductionsRes.data as SalarySlipDeduction[]) ?? []) {
+          ;(groupedDeductions[d.salary_slip_id] ??= []).push(d)
+        }
+        setRunDeductions(groupedDeductions)
       } else {
         setRunTrips({})
+        setRunDeductions({})
       }
     } catch (err) {
       setRunDetailError(err instanceof Error ? err.message : 'Failed to load this run.')
@@ -285,10 +297,14 @@ export default function SalaryPanel() {
 
   function slipTotal(slip: SalarySlip): number {
     const tripsTotal = (runTrips[slip.id] ?? []).reduce((s, t) => s + t.amount, 0)
-    return slip.basic_salary + slip.food_allowance + slip.phone_allowance + slip.bonus + tripsTotal
+    const deductionsTotal = (runDeductions[slip.id] ?? []).reduce((s, d) => s + d.amount, 0)
+    return slip.basic_salary + slip.food_allowance + slip.phone_allowance + slip.bonus + tripsTotal - deductionsTotal
   }
 
-  const runTotal = useMemo(() => runSlips.reduce((s, slip) => s + slipTotal(slip), 0), [runSlips, runTrips])
+  const runTotal = useMemo(
+    () => runSlips.reduce((s, slip) => s + slipTotal(slip), 0),
+    [runSlips, runTrips, runDeductions]
+  )
 
   // -- expand/edit a slip --
   const [expandedSlipId, setExpandedSlipId] = useState<string | null>(null)
@@ -306,6 +322,11 @@ export default function SalaryPanel() {
   const [newTripAmount, setNewTripAmount] = useState('')
   const [addingTrip, setAddingTrip] = useState(false)
 
+  const [newDeductionDate, setNewDeductionDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [newDeductionDescription, setNewDeductionDescription] = useState('')
+  const [newDeductionAmount, setNewDeductionAmount] = useState('')
+  const [addingDeduction, setAddingDeduction] = useState(false)
+
   function toggleSlip(slip: SalarySlip) {
     if (expandedSlipId === slip.id) {
       setExpandedSlipId(null)
@@ -321,6 +342,8 @@ export default function SalaryPanel() {
     setSlipError(null)
     setNewTripDescription('')
     setNewTripAmount('')
+    setNewDeductionDescription('')
+    setNewDeductionAmount('')
   }
 
   async function saveSlip(slipId: string) {
@@ -370,6 +393,31 @@ export default function SalaryPanel() {
     if (selectedRunId) loadRunDetail(selectedRunId)
   }
 
+  async function addDeduction(slipId: string) {
+    if (!newDeductionAmount) return
+    setAddingDeduction(true)
+    setSlipError(null)
+    const { error } = await supabase.from('salary_slip_deductions').insert({
+      salary_slip_id: slipId,
+      deduction_date: newDeductionDate,
+      description: newDeductionDescription,
+      amount: Number(newDeductionAmount) || 0,
+    })
+    setAddingDeduction(false)
+    if (error) {
+      setSlipError(error.message)
+      return
+    }
+    setNewDeductionDescription('')
+    setNewDeductionAmount('')
+    if (selectedRunId) loadRunDetail(selectedRunId)
+  }
+
+  async function removeDeduction(deductionId: string) {
+    await supabase.from('salary_slip_deductions').delete().eq('id', deductionId)
+    if (selectedRunId) loadRunDetail(selectedRunId)
+  }
+
   // -- confirm run --
   const [payDate, setPayDate] = useState('')
   const [confirmChecked, setConfirmChecked] = useState(false)
@@ -382,7 +430,7 @@ export default function SalaryPanel() {
     setConfirmError(null)
   }, [selectedRun?.id])
 
-  function buildSlipNotes(slip: SalarySlip, trips: SalarySlipTrip[]): string {
+  function buildSlipNotes(slip: SalarySlip, trips: SalarySlipTrip[], deductions: SalarySlipDeduction[]): string {
     const parts = [`Basic ${formatMVR(slip.basic_salary)}`]
     if (slip.food_allowance > 0) parts.push(`Food ${formatMVR(slip.food_allowance)}`)
     if (slip.phone_allowance > 0) parts.push(`Phone ${formatMVR(slip.phone_allowance)}`)
@@ -391,6 +439,11 @@ export default function SalaryPanel() {
       const tripsTotal = trips.reduce((s, t) => s + t.amount, 0)
       const tripLabels = trips.map((t) => t.description || t.trip_date).join(', ')
       parts.push(`Trips ${formatMVR(tripsTotal)} (${tripLabels})`)
+    }
+    if (deductions.length > 0) {
+      const deductionsTotal = deductions.reduce((s, d) => s + d.amount, 0)
+      const deductionLabels = deductions.map((d) => d.description || d.deduction_date).join(', ')
+      parts.push(`Deductions -${formatMVR(deductionsTotal)} (${deductionLabels})`)
     }
     return `Salary for ${selectedRun ? monthLabel(selectedRun.period_month) : ''}: ${parts.join(', ')}`
   }
@@ -404,6 +457,7 @@ export default function SalaryPanel() {
       for (const slip of runSlips) {
         const employee = employees.find((e) => e.id === slip.employee_id)
         const trips = runTrips[slip.id] ?? []
+        const deductions = runDeductions[slip.id] ?? []
         const { data: expense, error } = await supabase
           .from('expenses')
           .insert({
@@ -415,7 +469,7 @@ export default function SalaryPanel() {
             tax_amount: null,
             expense_date: payDate,
             vendor: employee?.name ?? 'Employee',
-            notes: buildSlipNotes(slip, trips),
+            notes: buildSlipNotes(slip, trips, deductions),
           })
           .select('id')
           .single()
@@ -734,6 +788,7 @@ export default function SalaryPanel() {
                     {runSlips.map((slip) => {
                       const employee = employees.find((e) => e.id === slip.employee_id)
                       const trips = runTrips[slip.id] ?? []
+                      const deductions = runDeductions[slip.id] ?? []
                       const total = slipTotal(slip)
                       const expanded = expandedSlipId === slip.id
                       const isDraft = selectedRun.status === 'draft'
@@ -755,6 +810,8 @@ export default function SalaryPanel() {
                                 <p className="text-xs text-gray-400 dark:text-gray-500">
                                   {vessels.find((v) => v.id === slip.vessel_id)?.name ?? 'Unassigned'}
                                   {trips.length > 0 && ` · ${trips.length} trip${trips.length === 1 ? '' : 's'}`}
+                                  {deductions.length > 0 &&
+                                    ` · ${deductions.length} deduction${deductions.length === 1 ? '' : 's'}`}
                                 </p>
                               </span>
                             </span>
@@ -907,6 +964,72 @@ export default function SalaryPanel() {
                                       className="rounded-lg border border-gray-300 dark:border-neutral-700 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800 disabled:opacity-50"
                                     >
                                       Add trip
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div>
+                                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                                  Deductions (e.g. advances)
+                                </p>
+                                {deductions.length > 0 && (
+                                  <div className="rounded-lg border border-gray-100 dark:border-neutral-800 divide-y divide-gray-100 dark:divide-neutral-800 mb-2">
+                                    {deductions.map((d) => (
+                                      <div
+                                        key={d.id}
+                                        className="flex items-center justify-between px-3 py-1.5 text-xs"
+                                      >
+                                        <span className="text-gray-600 dark:text-gray-300">
+                                          {d.deduction_date} · {d.description || 'Deduction'}
+                                        </span>
+                                        <span className="flex items-center gap-2">
+                                          <span className="text-red-600 dark:text-red-400">
+                                            -{formatMVR(d.amount)}
+                                          </span>
+                                          {isDraft && (
+                                            <button
+                                              onClick={() => removeDeduction(d.id)}
+                                              className="text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                                              aria-label="Remove deduction"
+                                            >
+                                              <Trash2 size={14} strokeWidth={1.75} />
+                                            </button>
+                                          )}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {isDraft && (
+                                  <div className="flex flex-wrap gap-2">
+                                    <input
+                                      type="date"
+                                      value={newDeductionDate}
+                                      onChange={(e) => setNewDeductionDate(e.target.value)}
+                                      className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-xs"
+                                    />
+                                    <input
+                                      value={newDeductionDescription}
+                                      onChange={(e) => setNewDeductionDescription(e.target.value)}
+                                      placeholder="Reason (e.g. Advance)"
+                                      className="flex-1 min-w-[8rem] rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-xs"
+                                    />
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={newDeductionAmount}
+                                      onChange={(e) => setNewDeductionAmount(e.target.value)}
+                                      placeholder="Amount"
+                                      className="w-24 rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1.5 text-xs"
+                                    />
+                                    <button
+                                      onClick={() => addDeduction(slip.id)}
+                                      disabled={addingDeduction || !newDeductionAmount}
+                                      className="rounded-lg border border-gray-300 dark:border-neutral-700 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800 disabled:opacity-50"
+                                    >
+                                      Add deduction
                                     </button>
                                   </div>
                                 )}
