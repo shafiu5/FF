@@ -274,6 +274,37 @@ export default function SalaryPanel() {
     setView('run')
   }
 
+  // Shared by run creation and the "apply loan installments" button on an
+  // already-open draft run: figures out which slips still owe this
+  // month's installment, skipping anyone who already has one applied or
+  // whose loan is already paid off.
+  function computeLoanDeductionsPayload(
+    slips: { id: string; employee_id: string }[],
+    periodMonth: string,
+    existingDeductionsBySlip: Record<string, SalarySlipDeduction[]> = {}
+  ) {
+    return slips.flatMap((slip) => {
+      const loan = loans.find((l) => l.employee_id === slip.employee_id && l.status === 'active')
+      if (!loan) return []
+      const alreadyApplied = (existingDeductionsBySlip[slip.id] ?? []).some((d) => d.loan_id === loan.id)
+      if (alreadyApplied) return []
+      const balance = loanBalances.find((b) => b.loan_id === loan.id)
+      const remaining = balance ? balance.remaining_amount : loan.principal_amount
+      if (remaining <= 0) return []
+      const amount = Math.min(loan.monthly_installment, remaining)
+      if (amount <= 0) return []
+      return [
+        {
+          salary_slip_id: slip.id,
+          deduction_date: periodMonth,
+          description: 'Loan repayment',
+          amount,
+          loan_id: loan.id,
+        },
+      ]
+    })
+  }
+
   async function createRun() {
     setCreatingRun(true)
     setRunsError(null)
@@ -331,24 +362,7 @@ export default function SalaryPanel() {
       // loan still owing a balance, capped so it never overshoots what's
       // left. Skipping a month for someone is just deleting this row from
       // their slip before confirming.
-      const loanDeductionsPayload = (newSlips ?? []).flatMap((slip) => {
-        const loan = loans.find((l) => l.employee_id === slip.employee_id && l.status === 'active')
-        if (!loan) return []
-        const balance = loanBalances.find((b) => b.loan_id === loan.id)
-        const remaining = balance ? balance.remaining_amount : loan.principal_amount
-        if (remaining <= 0) return []
-        const amount = Math.min(loan.monthly_installment, remaining)
-        if (amount <= 0) return []
-        return [
-          {
-            salary_slip_id: slip.id,
-            deduction_date: periodMonth,
-            description: 'Loan repayment',
-            amount,
-            loan_id: loan.id,
-          },
-        ]
-      })
+      const loanDeductionsPayload = computeLoanDeductionsPayload(newSlips ?? [], periodMonth)
       if (loanDeductionsPayload.length > 0) {
         const { error: loanDeductionsError } = await supabase
           .from('salary_slip_deductions')
@@ -373,6 +387,8 @@ export default function SalaryPanel() {
   const [runDeductions, setRunDeductions] = useState<Record<string, SalarySlipDeduction[]>>({})
   const [loadingRun, setLoadingRun] = useState(false)
   const [runDetailError, setRunDetailError] = useState<string | null>(null)
+  const [applyingLoans, setApplyingLoans] = useState(false)
+  const [loanApplyMessage, setLoanApplyMessage] = useState<string | null>(null)
 
   const selectedRun = runs.find((r) => r.id === selectedRunId) ?? null
 
@@ -546,6 +562,24 @@ export default function SalaryPanel() {
   async function removeDeduction(deductionId: string) {
     await supabase.from('salary_slip_deductions').delete().eq('id', deductionId)
     if (selectedRunId) loadRunDetail(selectedRunId)
+  }
+
+  const pendingLoanDeductions = useMemo(
+    () => (selectedRun ? computeLoanDeductionsPayload(runSlips, selectedRun.period_month, runDeductions) : []),
+    [runSlips, runDeductions, selectedRun, loans, loanBalances]
+  )
+
+  async function applyLoanInstallments() {
+    if (!selectedRun || pendingLoanDeductions.length === 0) return
+    setApplyingLoans(true)
+    setLoanApplyMessage(null)
+    const { error } = await supabase.from('salary_slip_deductions').insert(pendingLoanDeductions)
+    setApplyingLoans(false)
+    if (error) {
+      setLoanApplyMessage(error.message)
+      return
+    }
+    if (selectedRunId) await loadRunDetail(selectedRunId)
   }
 
   // -- confirm run --
@@ -1053,6 +1087,26 @@ export default function SalaryPanel() {
                     {formatMVR(runTotal)}
                   </p>
                 </div>
+
+                {selectedRun.status === 'draft' && pendingLoanDeductions.length > 0 && (
+                  <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 flex items-center justify-between gap-3">
+                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                      {pendingLoanDeductions.length} loan{' '}
+                      {pendingLoanDeductions.length === 1 ? 'installment hasn' : 'installments haven'}
+                      &rsquo;t been added to this run yet.
+                    </p>
+                    <button
+                      onClick={applyLoanInstallments}
+                      disabled={applyingLoans}
+                      className="shrink-0 rounded-lg border border-gray-300 dark:border-neutral-700 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800 disabled:opacity-50"
+                    >
+                      {applyingLoans ? 'Adding…' : 'Add loan installments'}
+                    </button>
+                  </div>
+                )}
+                {loanApplyMessage && (
+                  <p className="text-sm text-red-600 dark:text-red-400">{loanApplyMessage}</p>
+                )}
 
                 {runSlips.length === 0 ? (
                   <p className="text-sm text-gray-400 dark:text-gray-500">
