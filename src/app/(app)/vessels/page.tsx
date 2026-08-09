@@ -12,9 +12,7 @@ import { formatPercent, profitMargin } from '@/lib/margin'
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
 type IncomeRow = { vessel_id: string | null; amount: number; income_date: string }
 type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
-type PassengerLineRow = {
-  income_entries: { vessel_id: string | null; income_date: string } | null
-}
+type PassengerTotalRow = { vessel_id: string | null; income_date: string; passenger_count: number }
 
 export default function VesselsPage() {
   const supabase = createClient()
@@ -22,7 +20,7 @@ export default function VesselsPage() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
-  const [passengerLines, setPassengerLines] = useState<PassengerLineRow[]>([])
+  const [passengerTotals, setPassengerTotals] = useState<PassengerTotalRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -42,7 +40,7 @@ export default function VesselsPage() {
         supabase.from('expenses').select('vessel_id, amount, expense_date'),
         supabase.from('income_entries').select('vessel_id, amount, income_date'),
         supabase.from('fuel_entry_cost').select('vessel_id, cost, filled_at'),
-        supabase.from('income_entry_lines').select('income_entries(vessel_id, income_date)'),
+        supabase.from('income_entry_line_totals').select('vessel_id, income_date, passenger_count'),
       ])
       if (vesselsRes.error) throw vesselsRes.error
       if (expensesRes.error) throw expensesRes.error
@@ -53,7 +51,7 @@ export default function VesselsPage() {
       setExpenses((expensesRes.data as ExpenseRow[]) ?? [])
       setIncome((incomeRes.data as IncomeRow[]) ?? [])
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
-      setPassengerLines((passengerLinesRes.data as unknown as PassengerLineRow[]) ?? [])
+      setPassengerTotals((passengerLinesRes.data as PassengerTotalRow[]) ?? [])
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load vessels.')
     } finally {
@@ -90,18 +88,17 @@ export default function VesselsPage() {
       const t = map.get(i.vessel_id)
       if (t) t.income += i.amount
     }
-    for (const l of passengerLines) {
-      const entry = l.income_entries
-      if (!entry || !inRange(entry.income_date)) continue
-      if (!entry.vessel_id) {
-        unassigned.passengers += 1
+    for (const p of passengerTotals) {
+      if (!inRange(p.income_date)) continue
+      if (!p.vessel_id) {
+        unassigned.passengers += p.passenger_count
         continue
       }
-      const t = map.get(entry.vessel_id)
-      if (t) t.passengers += 1
+      const t = map.get(p.vessel_id)
+      if (t) t.passengers += p.passenger_count
     }
     return { map, unassigned }
-  }, [vessels, expenses, income, fuelCosts, passengerLines, from, to])
+  }, [vessels, expenses, income, fuelCosts, passengerTotals, from, to])
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">

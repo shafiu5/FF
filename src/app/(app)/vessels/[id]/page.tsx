@@ -38,7 +38,7 @@ export default function VesselDetailPage() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
-  const [passengerDates, setPassengerDates] = useState<string[]>([])
+  const [passengerTotals, setPassengerTotals] = useState<{ income_date: string; passenger_count: number }[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -71,9 +71,9 @@ export default function VesselDetailPage() {
           .eq('vessel_id', id)
           .order('filled_at', { ascending: false }),
         supabase
-          .from('income_entry_lines')
-          .select('income_entries!inner(vessel_id, income_date)')
-          .eq('income_entries.vessel_id', id),
+          .from('income_entry_line_totals')
+          .select('income_date, passenger_count')
+          .eq('vessel_id', id),
       ])
       if (vesselRes.error) throw vesselRes.error
       if (expensesRes.error) throw expensesRes.error
@@ -84,9 +84,9 @@ export default function VesselDetailPage() {
       setExpenses((expensesRes.data as ExpenseRow[]) ?? [])
       setIncome((incomeRes.data as IncomeRow[]) ?? [])
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
-      const passengerRows =
-        (passengerLinesRes.data as unknown as { income_entries: { income_date: string } | null }[]) ?? []
-      setPassengerDates(passengerRows.map((r) => r.income_entries?.income_date).filter((d): d is string => !!d))
+      setPassengerTotals(
+        (passengerLinesRes.data as { income_date: string; passenger_count: number }[]) ?? []
+      )
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load this vessel.')
     } finally {
@@ -135,8 +135,11 @@ export default function VesselDetailPage() {
     [filtered]
   )
   const totalPassengers = useMemo(
-    () => passengerDates.filter((d) => (!from || d >= from) && (!to || d <= to)).length,
-    [passengerDates, from, to]
+    () =>
+      passengerTotals
+        .filter((p) => (!from || p.income_date >= from) && (!to || p.income_date <= to))
+        .reduce((sum, p) => sum + p.passenger_count, 0),
+    [passengerTotals, from, to]
   )
   const margin = profitMargin(totalIncome, totalExpense)
 

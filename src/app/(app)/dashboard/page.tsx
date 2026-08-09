@@ -22,9 +22,7 @@ import { formatPercent, profitMargin } from '@/lib/margin'
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
 type IncomeRow = { vessel_id: string | null; amount: number; income_date: string; is_tax_free: boolean }
 type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
-type PassengerLineRow = {
-  income_entries: { vessel_id: string | null; income_date: string } | null
-}
+type PassengerTotalRow = { vessel_id: string | null; income_date: string; passenger_count: number }
 
 export default function DashboardPage() {
   const supabase = createClient()
@@ -32,7 +30,7 @@ export default function DashboardPage() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
-  const [passengerLines, setPassengerLines] = useState<PassengerLineRow[]>([])
+  const [passengerTotals, setPassengerTotals] = useState<PassengerTotalRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -52,7 +50,7 @@ export default function DashboardPage() {
         supabase.from('expenses').select('vessel_id, amount, expense_date'),
         supabase.from('income_entries').select('vessel_id, amount, income_date, is_tax_free'),
         supabase.from('fuel_entry_cost').select('vessel_id, cost, filled_at'),
-        supabase.from('income_entry_lines').select('income_entries(vessel_id, income_date)'),
+        supabase.from('income_entry_line_totals').select('vessel_id, income_date, passenger_count'),
       ])
       if (vesselsRes.error) throw vesselsRes.error
       if (expensesRes.error) throw expensesRes.error
@@ -63,7 +61,7 @@ export default function DashboardPage() {
       setExpenses((expensesRes.data as ExpenseRow[]) ?? [])
       setIncome((incomeRes.data as IncomeRow[]) ?? [])
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
-      setPassengerLines((passengerLinesRes.data as unknown as PassengerLineRow[]) ?? [])
+      setPassengerTotals((passengerLinesRes.data as PassengerTotalRow[]) ?? [])
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load the dashboard.')
     } finally {
@@ -87,14 +85,14 @@ export default function DashboardPage() {
     [fuelCosts, from, to]
   )
 
-  const filteredPassengerLines = useMemo(
-    () =>
-      passengerLines.filter(
-        (l) => l.income_entries && (!from || l.income_entries.income_date >= from) && (!to || l.income_entries.income_date <= to)
-      ),
-    [passengerLines, from, to]
+  const filteredPassengerTotals = useMemo(
+    () => passengerTotals.filter((t) => (!from || t.income_date >= from) && (!to || t.income_date <= to)),
+    [passengerTotals, from, to]
   )
-  const totalPassengers = filteredPassengerLines.length
+  const totalPassengers = useMemo(
+    () => filteredPassengerTotals.reduce((sum, t) => sum + t.passenger_count, 0),
+    [filteredPassengerTotals]
+  )
 
   const totalIncome = useMemo(() => filteredIncome.reduce((s, i) => s + i.amount, 0), [filteredIncome])
   const taxFreeIncome = useMemo(
@@ -140,14 +138,13 @@ export default function DashboardPage() {
       const t = map.get(i.vessel_id)
       if (t) t.income += i.amount
     }
-    for (const l of filteredPassengerLines) {
-      const vesselId = l.income_entries?.vessel_id
-      if (!vesselId) {
-        unassigned.passengers += 1
+    for (const t of filteredPassengerTotals) {
+      if (!t.vessel_id) {
+        unassigned.passengers += t.passenger_count
         continue
       }
-      const t = map.get(vesselId)
-      if (t) t.passengers += 1
+      const entry = map.get(t.vessel_id)
+      if (entry) entry.passengers += t.passenger_count
     }
     const rows: VesselTotal[] = vessels.map((v) => ({
       id: v.id,
@@ -159,7 +156,7 @@ export default function DashboardPage() {
       rows.push({ id: '__unassigned', name: 'Unassigned', isUnassigned: true, ...unassigned })
     }
     return rows.sort((a, b) => b.income - b.expense - (a.income - a.expense))
-  }, [vessels, filteredExpenses, filteredFuel, filteredIncome, filteredPassengerLines])
+  }, [vessels, filteredExpenses, filteredFuel, filteredIncome, filteredPassengerTotals])
 
   const monthly = useMemo(() => {
     const map = new Map<string, { month: string; income: number; expense: number }>()

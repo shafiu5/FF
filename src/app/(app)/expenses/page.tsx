@@ -57,7 +57,7 @@ export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
-  const [incomeLineTotals, setIncomeLineTotals] = useState<Record<string, { amount: number; is_tax_free: boolean }[]>>({})
+  const [incomeLineTotals, setIncomeLineTotals] = useState<Record<string, { taxFreeAmount: number; taxableAmount: number }>>({})
   const [defaultTaxPercent, setDefaultTaxPercent] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -107,7 +107,7 @@ export default function ExpensesPage() {
           .order('filled_at', { ascending: false }),
         supabase.from('app_settings').select('tax_percent').eq('id', true).maybeSingle(),
         supabase.from('income_entries').select('id, amount, income_date, is_tax_free'),
-        supabase.from('income_entry_lines').select('income_entry_id, amount, is_tax_free'),
+        supabase.from('income_entry_line_totals').select('income_entry_id, tax_free_amount, taxable_amount'),
       ])
       if (vesselsRes.error) throw vesselsRes.error
       if (expensesRes.error) throw expensesRes.error
@@ -120,9 +120,11 @@ export default function ExpensesPage() {
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
       setDefaultTaxPercent(settingsRes.data?.tax_percent ?? 0)
       setIncome((incomeRes.data as IncomeRow[]) ?? [])
-      const groupedLines: Record<string, { amount: number; is_tax_free: boolean }[]> = {}
-      for (const l of (incomeLinesRes.data as { income_entry_id: string; amount: number; is_tax_free: boolean }[]) ?? []) {
-        ;(groupedLines[l.income_entry_id] ??= []).push({ amount: l.amount, is_tax_free: l.is_tax_free })
+      const groupedLines: Record<string, { taxFreeAmount: number; taxableAmount: number }> = {}
+      for (const l of (incomeLinesRes.data as
+        | { income_entry_id: string; tax_free_amount: number; taxable_amount: number }[]
+        | null) ?? []) {
+        groupedLines[l.income_entry_id] = { taxFreeAmount: l.tax_free_amount, taxableAmount: l.taxable_amount }
       }
       setIncomeLineTotals(groupedLines)
     } catch (err) {

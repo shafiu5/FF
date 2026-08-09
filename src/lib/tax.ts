@@ -14,17 +14,23 @@ export type IncomeTaxBreakdown = {
 // An income entry with line items (e.g. a "whole file" import) can be a mix
 // of tax-free and taxable passengers within one entry — tax must be
 // computed only on the taxable lines' share, not the entry's full amount.
-// Entries without lines fall back to their own is_tax_free flag.
+// `lineTotals` comes pre-aggregated from the income_entry_line_totals view
+// (one row per entry) rather than raw per-passenger rows, since fetching
+// every line to sum client-side silently truncates once the table crosses
+// PostgREST's row cap. Entries without lines fall back to their own
+// is_tax_free flag.
 export function computeIncomeTaxBreakdown(
   entryAmount: number,
   entryIsTaxFree: boolean,
-  lines: { amount: number; is_tax_free: boolean }[] | undefined,
+  lineTotals: { taxFreeAmount: number; taxableAmount: number } | undefined,
   taxPercent: number
 ): IncomeTaxBreakdown {
-  if (lines && lines.length > 0) {
-    const taxFreeAmount = lines.filter((l) => l.is_tax_free).reduce((sum, l) => sum + l.amount, 0)
-    const taxableAmount = lines.filter((l) => !l.is_tax_free).reduce((sum, l) => sum + l.amount, 0)
-    return { taxFreeAmount, taxableAmount, tax: extractTax(taxableAmount, taxPercent) }
+  if (lineTotals && lineTotals.taxFreeAmount + lineTotals.taxableAmount > 0) {
+    return {
+      taxFreeAmount: lineTotals.taxFreeAmount,
+      taxableAmount: lineTotals.taxableAmount,
+      tax: extractTax(lineTotals.taxableAmount, taxPercent),
+    }
   }
   if (entryIsTaxFree) {
     return { taxFreeAmount: entryAmount, taxableAmount: 0, tax: 0 }
