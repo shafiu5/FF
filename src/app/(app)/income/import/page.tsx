@@ -218,7 +218,12 @@ export default function ImportIncomePage() {
       const { error: linesError } = await supabase.from('income_entry_lines').insert(lines)
       setImporting(false)
       if (linesError) {
-        setImportError(linesError.message)
+        // Don't leave an orphaned entry with the full amount but no line
+        // breakdown — that silently taxes passengers who should be tax-free.
+        await supabase.from('income_entries').delete().eq('id', entry.id)
+        setImportError(
+          `The passenger lines failed to save, so nothing was imported: ${linesError.message}`
+        )
         return
       }
       setImportBatchId(batchId)
@@ -513,7 +518,12 @@ export default function ImportIncomePage() {
             ))}
           </div>
 
-          {importError && <p className="text-sm text-red-600 dark:text-red-400">{importError}</p>}
+          {importError && (
+            <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4">
+              <p className="text-sm font-medium text-red-700 dark:text-red-400">Import failed</p>
+              <p className="text-sm text-red-600 dark:text-red-400 mt-1">{importError}</p>
+            </div>
+          )}
           <button
             onClick={confirmImport}
             disabled={importing || includedCount === 0}
@@ -621,7 +631,12 @@ export default function ImportIncomePage() {
             ))}
           </div>
 
-          {importError && <p className="text-sm text-red-600 dark:text-red-400">{importError}</p>}
+          {importError && (
+            <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4">
+              <p className="text-sm font-medium text-red-700 dark:text-red-400">Import failed</p>
+              <p className="text-sm text-red-600 dark:text-red-400 mt-1">{importError}</p>
+            </div>
+          )}
           <button
             onClick={confirmImport}
             disabled={importing || includedCount === 0}
