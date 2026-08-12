@@ -25,6 +25,10 @@ type IncomeRow = { vessel_id: string | null; amount: number; income_date: string
 type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
 type PassengerTotalRow = { vessel_id: string | null; income_date: string; passenger_count: number }
 
+// Data entered before this date is known to be incomplete/incorrect, so the
+// projection's daily run-rate is only averaged from here forward.
+const PROJECTION_BASIS_START = '2026-08-01'
+
 export default function DashboardPage() {
   const supabase = createClient()
   const [vessels, setVessels] = useState<Vessel[]>([])
@@ -159,16 +163,69 @@ export default function DashboardPage() {
     return rows.sort((a, b) => b.income - b.expense - (a.income - a.expense))
   }, [vessels, filteredExpenses, filteredFuel, filteredIncome, filteredPassengerTotals])
 
+  // Daily run-rate used for the projection: total income/expense from
+  // PROJECTION_BASIS_START through today, divided by however many days
+  // that spans — independent of whatever date range is filtered above.
+  const projectionBasis = useMemo(() => {
+    const todayISO = toISODate(new Date())
+    const start = PROJECTION_BASIS_START
+    const end = todayISO < start ? start : todayISO
+    const incomeSum = income
+      .filter((i) => i.income_date >= start && i.income_date <= end)
+      .reduce((s, i) => s + i.amount, 0)
+    const expenseSum =
+      expenses
+        .filter((e) => e.expense_date >= start && e.expense_date <= end)
+        .reduce((s, e) => s + e.amount, 0) +
+      fuelCosts
+        .filter((f) => f.filled_at >= start && f.filled_at <= end)
+        .reduce((s, f) => s + (f.cost ?? 0), 0)
+    const [sy, sm, sd] = start.split('-').map(Number)
+    const [ey, em, ed] = end.split('-').map(Number)
+    const dayCount =
+      Math.round((new Date(ey, em - 1, ed).getTime() - new Date(sy, sm - 1, sd).getTime()) / 86400000) + 1
+    return { avgIncome: incomeSum / dayCount, avgExpense: expenseSum / dayCount }
+  }, [income, expenses, fuelCosts])
+
+  // One month of projected days right after the selected range, so the
+  // projected line picks up exactly where the actual line ends.
+  const projectionWindow = useMemo(() => {
+    if (!to) return null
+    const [ty, tm, td] = to.split('-').map(Number)
+    const start = new Date(ty, tm - 1, td)
+    start.setDate(start.getDate() + 1)
+    // "One month" measured from `start`, not from `to` — doing the +1
+    // month math on the 31st (say) would overflow into the month after
+    // next since not every month has 31 days.
+    const end = new Date(start)
+    end.setMonth(end.getMonth() + 1)
+    end.setDate(end.getDate() - 1)
+    const days = Math.round((end.getTime() - start.getTime()) / 86400000) + 1
+    return { start, end, days }
+  }, [to])
+
+  const projectedNextMonth = useMemo(() => {
+    if (!projectionWindow) return null
+    return (projectionBasis.avgIncome - projectionBasis.avgExpense) * projectionWindow.days
+  }, [projectionWindow, projectionBasis])
+
   const daily = useMemo(() => {
-    const map = new Map<string, { date: string; income: number; expense: number }>()
+    type DailyPoint = {
+      date: string
+      income?: number
+      expense?: number
+      projIncome?: number
+      projExpense?: number
+    }
+    const map = new Map<string, DailyPoint>()
     function bucket(date: string) {
       const day = date.slice(0, 10)
       if (!map.has(day)) map.set(day, { date: day, income: 0, expense: 0 })
       return map.get(day)!
     }
-    for (const i of filteredIncome) bucket(i.income_date).income += i.amount
-    for (const e of filteredExpenses) bucket(e.expense_date).expense += e.amount
-    for (const f of filteredFuel) bucket(f.filled_at).expense += f.cost ?? 0
+    for (const i of filteredIncome) bucket(i.income_date).income! += i.amount
+    for (const e of filteredExpenses) bucket(e.expense_date).expense! += e.amount
+    for (const f of filteredFuel) bucket(f.filled_at).expense! += f.cost ?? 0
     // Zero-fill every day in the selected range so a day with no
     // transactions shows as a gap in the line, not a skipped x-axis step
     // that quietly compresses the timeline.
@@ -178,9 +235,27 @@ export default function DashboardPage() {
       for (let d = new Date(fy, fm - 1, fd); d <= new Date(ty, tm - 1, td); d.setDate(d.getDate() + 1)) {
         bucket(toISODate(d))
       }
+      // Bridge point: give the last actual day a projected value too, equal
+      // to its actual value, so the dashed projected line starts exactly
+      // where the solid actual line ends instead of jumping in with a gap.
+      const lastActual = map.get(to)
+      if (lastActual) {
+        lastActual.projIncome = lastActual.income
+        lastActual.projExpense = lastActual.expense
+      }
+    }
+    if (projectionWindow) {
+      for (let d = new Date(projectionWindow.start); d <= projectionWindow.end; d.setDate(d.getDate() + 1)) {
+        const day = toISODate(d)
+        map.set(day, {
+          date: day,
+          projIncome: projectionBasis.avgIncome,
+          projExpense: projectionBasis.avgExpense,
+        })
+      }
     }
     return [...map.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
-  }, [filteredIncome, filteredExpenses, filteredFuel, from, to])
+  }, [filteredIncome, filteredExpenses, filteredFuel, from, to, projectionWindow, projectionBasis])
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
@@ -246,6 +321,11 @@ export default function DashboardPage() {
               <p className={`font-semibold ${net >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                 {formatMVR(net)}
               </p>
+              {projectedNextMonth != null && (
+                <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                  Next month (projected): {formatMVR(projectedNextMonth)}
+                </p>
+              )}
             </div>
           </div>
 
@@ -278,7 +358,10 @@ export default function DashboardPage() {
                   <XAxis
                     dataKey="date"
                     tick={{ fontSize: 11 }}
-                    tickFormatter={(d: string) => d.slice(8, 10)}
+                    tickFormatter={(d: string) => {
+                      const [, m, day] = d.split('-')
+                      return `${Number(m)}/${Number(day)}`
+                    }}
                     minTickGap={16}
                   />
                   <YAxis tick={{ fontSize: 12 }} />
@@ -292,6 +375,7 @@ export default function DashboardPage() {
                     strokeWidth={2}
                     dot={false}
                     activeDot={{ r: 4 }}
+                    connectNulls={false}
                   />
                   <Line
                     type="monotone"
@@ -301,6 +385,31 @@ export default function DashboardPage() {
                     strokeWidth={2}
                     dot={false}
                     activeDot={{ r: 4 }}
+                    connectNulls={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="projIncome"
+                    stroke="#059669"
+                    strokeOpacity={0.6}
+                    name="Income (projected)"
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="projExpense"
+                    stroke="#dc2626"
+                    strokeOpacity={0.6}
+                    name="Expense (projected)"
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                    connectNulls
                   />
                 </LineChart>
               </ResponsiveContainer>
