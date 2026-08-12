@@ -188,6 +188,24 @@ export default function DashboardPage() {
     for (const f of fuelCosts) {
       if (f.filled_at >= start && f.filled_at <= end) dayEntry(f.filled_at.slice(0, 10)).expense += f.cost ?? 0
     }
+    // A one-off spike (a big repair bill, a bulk import) shouldn't get
+    // treated as "this happens every week" just because it landed on one
+    // particular day-of-week — especially with only a couple of weeks of
+    // history, where a single outlier day IS that day-of-week's whole
+    // sample. Cap any single day at 3x the median *active* day before it
+    // feeds the day-of-week average, so it still counts but can't alone
+    // define the recurring pattern.
+    function median(values: number[]): number {
+      const sorted = [...values].sort((a, b) => a - b)
+      if (sorted.length === 0) return 0
+      const mid = Math.floor(sorted.length / 2)
+      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+    }
+    const activeIncomeDays = [...dailyTotals.values()].map((v) => v.income).filter((v) => v > 0)
+    const activeExpenseDays = [...dailyTotals.values()].map((v) => v.expense).filter((v) => v > 0)
+    const incomeCap = activeIncomeDays.length > 0 ? median(activeIncomeDays) * 3 : Infinity
+    const expenseCap = activeExpenseDays.length > 0 ? median(activeExpenseDays) * 3 : Infinity
+
     const incomeByDow = Array(7).fill(0)
     const expenseByDow = Array(7).fill(0)
     const countByDow = Array(7).fill(0)
@@ -196,8 +214,8 @@ export default function DashboardPage() {
     for (let d = new Date(sy, sm - 1, sd); d <= new Date(ey, em - 1, ed); d.setDate(d.getDate() + 1)) {
       const entry = dayEntry(toISODate(d))
       const dow = d.getDay()
-      incomeByDow[dow] += entry.income
-      expenseByDow[dow] += entry.expense
+      incomeByDow[dow] += Math.min(entry.income, incomeCap)
+      expenseByDow[dow] += Math.min(entry.expense, expenseCap)
       countByDow[dow] += 1
     }
     const totalDays = countByDow.reduce((a, b) => a + b, 0) || 1
