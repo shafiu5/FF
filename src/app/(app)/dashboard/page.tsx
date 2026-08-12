@@ -165,28 +165,58 @@ export default function DashboardPage() {
 
   const today = useMemo(() => toISODate(new Date()), [])
 
-  // Daily run-rate used for the projection: total income/expense from
-  // PROJECTION_BASIS_START through today, divided by however many days
-  // that spans — independent of whatever date range is filtered above.
+  // Run-rate used for the projection, averaged per day-of-week (not one
+  // flat number) from PROJECTION_BASIS_START through today — so a
+  // projected Friday looks like past Fridays instead of every day being
+  // identical. Falls back to the overall average for any day-of-week with
+  // no history yet.
   const projectionBasis = useMemo(() => {
     const start = PROJECTION_BASIS_START
     const end = today < start ? start : today
-    const incomeSum = income
-      .filter((i) => i.income_date >= start && i.income_date <= end)
-      .reduce((s, i) => s + i.amount, 0)
-    const expenseSum =
-      expenses
-        .filter((e) => e.expense_date >= start && e.expense_date <= end)
-        .reduce((s, e) => s + e.amount, 0) +
-      fuelCosts
-        .filter((f) => f.filled_at >= start && f.filled_at <= end)
-        .reduce((s, f) => s + (f.cost ?? 0), 0)
+    const dailyTotals = new Map<string, { income: number; expense: number }>()
+    function dayEntry(date: string) {
+      if (!dailyTotals.has(date)) dailyTotals.set(date, { income: 0, expense: 0 })
+      return dailyTotals.get(date)!
+    }
+    for (const i of income) {
+      if (i.income_date >= start && i.income_date <= end) dayEntry(i.income_date.slice(0, 10)).income += i.amount
+    }
+    for (const e of expenses) {
+      if (e.expense_date >= start && e.expense_date <= end)
+        dayEntry(e.expense_date.slice(0, 10)).expense += e.amount
+    }
+    for (const f of fuelCosts) {
+      if (f.filled_at >= start && f.filled_at <= end) dayEntry(f.filled_at.slice(0, 10)).expense += f.cost ?? 0
+    }
+    const incomeByDow = Array(7).fill(0)
+    const expenseByDow = Array(7).fill(0)
+    const countByDow = Array(7).fill(0)
     const [sy, sm, sd] = start.split('-').map(Number)
     const [ey, em, ed] = end.split('-').map(Number)
-    const dayCount =
-      Math.round((new Date(ey, em - 1, ed).getTime() - new Date(sy, sm - 1, sd).getTime()) / 86400000) + 1
-    return { avgIncome: incomeSum / dayCount, avgExpense: expenseSum / dayCount }
+    for (let d = new Date(sy, sm - 1, sd); d <= new Date(ey, em - 1, ed); d.setDate(d.getDate() + 1)) {
+      const entry = dayEntry(toISODate(d))
+      const dow = d.getDay()
+      incomeByDow[dow] += entry.income
+      expenseByDow[dow] += entry.expense
+      countByDow[dow] += 1
+    }
+    const totalDays = countByDow.reduce((a, b) => a + b, 0) || 1
+    return {
+      avgIncomeByDow: incomeByDow.map((sum, i) => (countByDow[i] > 0 ? sum / countByDow[i] : 0)),
+      avgExpenseByDow: expenseByDow.map((sum, i) => (countByDow[i] > 0 ? sum / countByDow[i] : 0)),
+      overallAvgIncome: incomeByDow.reduce((a, b) => a + b, 0) / totalDays,
+      overallAvgExpense: expenseByDow.reduce((a, b) => a + b, 0) / totalDays,
+      hasDow: countByDow.map((c) => c > 0),
+    }
   }, [income, expenses, fuelCosts, today])
+
+  function projectedForDay(d: Date) {
+    const dow = d.getDay()
+    return {
+      income: projectionBasis.hasDow[dow] ? projectionBasis.avgIncomeByDow[dow] : projectionBasis.overallAvgIncome,
+      expense: projectionBasis.hasDow[dow] ? projectionBasis.avgExpenseByDow[dow] : projectionBasis.overallAvgExpense,
+    }
+  }
 
   // The remaining days of the selected range that haven't happened yet —
   // i.e. today through `to`, when `to` is still in the future. Nothing to
@@ -206,7 +236,12 @@ export default function DashboardPage() {
 
   const projectedMonthEnd = useMemo(() => {
     if (!projectionWindow) return null
-    return net + (projectionBasis.avgIncome - projectionBasis.avgExpense) * projectionWindow.days
+    let projectedNet = 0
+    for (let d = new Date(projectionWindow.start); d <= projectionWindow.end; d.setDate(d.getDate() + 1)) {
+      const { income, expense } = projectedForDay(d)
+      projectedNet += income - expense
+    }
+    return net + projectedNet
   }, [projectionWindow, projectionBasis, net])
 
   const daily = useMemo(() => {
@@ -252,11 +287,8 @@ export default function DashboardPage() {
     if (projectionWindow) {
       for (let d = new Date(projectionWindow.start); d <= projectionWindow.end; d.setDate(d.getDate() + 1)) {
         const day = toISODate(d)
-        map.set(day, {
-          date: day,
-          projIncome: projectionBasis.avgIncome,
-          projExpense: projectionBasis.avgExpense,
-        })
+        const { income: projIncome, expense: projExpense } = projectedForDay(d)
+        map.set(day, { date: day, projIncome, projExpense })
       }
     }
     return [...map.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
