@@ -10,6 +10,7 @@ import type { IncomeEntryLine } from '@/lib/types'
 import { computeIncomeTaxBreakdown } from '@/lib/tax'
 import { matchesOmitRule } from '@/lib/xlsxImport'
 import { currentMonthRange } from '@/lib/dateRange'
+import Skeleton, { SkeletonList } from '@/components/Skeleton'
 
 type VesselOption = { id: string; name: string }
 type IncomeRow = {
@@ -308,7 +309,7 @@ export default function IncomePage() {
       <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
 
       {loading ? (
-        <p className="text-gray-400 dark:text-gray-500">Loading…</p>
+        <SkeletonList />
       ) : loadError ? (
         <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
@@ -463,7 +464,7 @@ export default function IncomePage() {
                   {expanded && (
                     <div className="px-4 pb-3 pl-10">
                       {loadingLines === i.id ? (
-                        <p className="text-xs text-gray-400 dark:text-gray-500">Loading…</p>
+                        <Skeleton className="h-8" />
                       ) : (
                         <div className="rounded-lg border border-gray-100 dark:border-neutral-800 divide-y divide-gray-100 dark:divide-neutral-800">
                           {(lines[i.id] ?? []).map((l) => (

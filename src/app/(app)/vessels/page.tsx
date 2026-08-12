@@ -8,6 +8,7 @@ import type { Vessel } from '@/lib/types'
 import DateRangeFilter from '@/components/DateRangeFilter'
 import { currentMonthRange } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
+import { SkeletonList } from '@/components/Skeleton'
 
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
 type IncomeRow = { vessel_id: string | null; amount: number; income_date: string }
@@ -107,7 +108,7 @@ export default function VesselsPage() {
       <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
 
       {loading ? (
-        <p className="text-gray-400 dark:text-gray-500">Loading…</p>
+        <SkeletonList withHeading={false} />
       ) : loadError ? (
         <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>

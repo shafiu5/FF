@@ -10,6 +10,7 @@ import DateRangeFilter from '@/components/DateRangeFilter'
 import type { Vessel } from '@/lib/types'
 import { currentMonthRange } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
+import Skeleton, { SkeletonList } from '@/components/Skeleton'
 
 type ExpenseRow = { id: string; category: string; amount: number; expense_date: string; vendor: string }
 type IncomeRow = {
@@ -144,7 +145,21 @@ export default function VesselDetailPage() {
   const margin = profitMargin(totalIncome, totalExpense)
 
   if (loading) {
-    return <main className="max-w-2xl mx-auto px-4 py-6 text-gray-400 dark:text-gray-500">Loading…</main>
+    return (
+      <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+        <Skeleton className="h-4 w-20" />
+        <div>
+          <Skeleton className="h-7 w-40 mb-3" />
+          <div className="grid grid-cols-3 gap-3">
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+          </div>
+        </div>
+        <Skeleton className="h-10 w-full rounded-lg" />
+        <SkeletonList withHeading={false} />
+      </main>
+    )
   }
   if (loadError) {
     return (

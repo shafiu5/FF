@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { LogOut, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { OmitRule } from '@/lib/types'
+import { SkeletonList } from '@/components/Skeleton'
 
 export default function SettingsPage() {
   const router = useRouter()
@@ -178,7 +179,7 @@ export default function SettingsPage() {
         </form>
 
         {loading ? (
-          <p className="text-gray-400 dark:text-gray-500">Loading…</p>
+          <SkeletonList rows={3} withHeading={false} />
         ) : loadError ? (
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
         ) : rules.length === 0 ? (

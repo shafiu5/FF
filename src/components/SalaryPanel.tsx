@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Plus, X, Trash2, Pencil, ChevronDown, ChevronRight, ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
+import { SkeletonList } from '@/components/Skeleton'
 import type {
   Employee,
   SalaryRun,
@@ -669,7 +670,7 @@ export default function SalaryPanel() {
   // Render
   // ---------------------------------------------------------------------
   if (loading) {
-    return <p className="text-gray-400 dark:text-gray-500">Loading…</p>
+    return <SkeletonList withHeading={false} />
   }
   if (loadError) {
     return (
@@ -1061,7 +1062,7 @@ export default function SalaryPanel() {
           </button>
 
           {loadingRun ? (
-            <p className="text-gray-400 dark:text-gray-500">Loading…</p>
+            <SkeletonList rows={3} withHeading={false} />
           ) : runDetailError ? (
             <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4">
               <p className="text-sm text-red-600 dark:text-red-400">{runDetailError}</p>

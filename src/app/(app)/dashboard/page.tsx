@@ -18,6 +18,7 @@ import DateRangeFilter from '@/components/DateRangeFilter'
 import type { Vessel } from '@/lib/types'
 import { currentMonthRange, toISODate } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
+import Skeleton from '@/components/Skeleton'
 
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
 type IncomeRow = { vessel_id: string | null; amount: number; income_date: string; is_tax_free: boolean }
@@ -186,7 +187,33 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold">Dashboard</h1>
 
       {loading ? (
-        <p className="text-gray-400 dark:text-gray-500">Loading…</p>
+        <div className="space-y-6">
+          <Skeleton className="h-10 w-full rounded-lg" />
+          <div className="grid grid-cols-3 gap-3">
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Skeleton className="h-14" />
+            <Skeleton className="h-14" />
+          </div>
+          <Skeleton className="h-56 rounded-2xl" />
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-24" />
+            <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 overflow-hidden divide-y divide-gray-100 dark:divide-neutral-800">
+              <div className="p-4">
+                <Skeleton className="h-10" />
+              </div>
+              <div className="p-4">
+                <Skeleton className="h-10" />
+              </div>
+              <div className="p-4">
+                <Skeleton className="h-10" />
+              </div>
+            </div>
+          </div>
+        </div>
       ) : loadError ? (
         <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>

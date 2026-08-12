@@ -9,6 +9,7 @@ import DateRangeFilter from '@/components/DateRangeFilter'
 import { computeIncomeTaxBreakdown, extractTax } from '@/lib/tax'
 import { currentMonthRange } from '@/lib/dateRange'
 import SalaryPanel from '@/components/SalaryPanel'
+import { SkeletonList } from '@/components/Skeleton'
 
 type VesselOption = { id: string; name: string }
 type ExpenseRow = {
@@ -510,7 +511,7 @@ export default function ExpensesPage() {
 
       {tab === 'expenses' &&
         (loading ? (
-          <p className="text-gray-400 dark:text-gray-500">Loading…</p>
+          <SkeletonList />
         ) : loadError ? (
           <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
             <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
