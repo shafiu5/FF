@@ -163,13 +163,14 @@ export default function DashboardPage() {
     return rows.sort((a, b) => b.income - b.expense - (a.income - a.expense))
   }, [vessels, filteredExpenses, filteredFuel, filteredIncome, filteredPassengerTotals])
 
+  const today = useMemo(() => toISODate(new Date()), [])
+
   // Daily run-rate used for the projection: total income/expense from
   // PROJECTION_BASIS_START through today, divided by however many days
   // that spans — independent of whatever date range is filtered above.
   const projectionBasis = useMemo(() => {
-    const todayISO = toISODate(new Date())
     const start = PROJECTION_BASIS_START
-    const end = todayISO < start ? start : todayISO
+    const end = today < start ? start : today
     const incomeSum = income
       .filter((i) => i.income_date >= start && i.income_date <= end)
       .reduce((s, i) => s + i.amount, 0)
@@ -185,29 +186,28 @@ export default function DashboardPage() {
     const dayCount =
       Math.round((new Date(ey, em - 1, ed).getTime() - new Date(sy, sm - 1, sd).getTime()) / 86400000) + 1
     return { avgIncome: incomeSum / dayCount, avgExpense: expenseSum / dayCount }
-  }, [income, expenses, fuelCosts])
+  }, [income, expenses, fuelCosts, today])
 
-  // One month of projected days right after the selected range, so the
-  // projected line picks up exactly where the actual line ends.
+  // The remaining days of the selected range that haven't happened yet —
+  // i.e. today through `to`, when `to` is still in the future. Nothing to
+  // project for a range that's already fully in the past.
   const projectionWindow = useMemo(() => {
-    if (!to) return null
-    const [ty, tm, td] = to.split('-').map(Number)
-    const start = new Date(ty, tm - 1, td)
+    if (!from || !to || to <= today) return null
+    const actualEnd = today < from ? from : today
+    const [ay, am, ad] = actualEnd.split('-').map(Number)
+    const start = new Date(ay, am - 1, ad)
     start.setDate(start.getDate() + 1)
-    // "One month" measured from `start`, not from `to` — doing the +1
-    // month math on the 31st (say) would overflow into the month after
-    // next since not every month has 31 days.
-    const end = new Date(start)
-    end.setMonth(end.getMonth() + 1)
-    end.setDate(end.getDate() - 1)
+    const [ty, tm, td] = to.split('-').map(Number)
+    const end = new Date(ty, tm - 1, td)
+    if (start > end) return null
     const days = Math.round((end.getTime() - start.getTime()) / 86400000) + 1
-    return { start, end, days }
-  }, [to])
+    return { start, end, days, actualEnd }
+  }, [from, to, today])
 
-  const projectedNextMonth = useMemo(() => {
+  const projectedMonthEnd = useMemo(() => {
     if (!projectionWindow) return null
-    return (projectionBasis.avgIncome - projectionBasis.avgExpense) * projectionWindow.days
-  }, [projectionWindow, projectionBasis])
+    return net + (projectionBasis.avgIncome - projectionBasis.avgExpense) * projectionWindow.days
+  }, [projectionWindow, projectionBasis, net])
 
   const daily = useMemo(() => {
     type DailyPoint = {
@@ -226,22 +226,27 @@ export default function DashboardPage() {
     for (const i of filteredIncome) bucket(i.income_date).income! += i.amount
     for (const e of filteredExpenses) bucket(e.expense_date).expense! += e.amount
     for (const f of filteredFuel) bucket(f.filled_at).expense! += f.cost ?? 0
-    // Zero-fill every day in the selected range so a day with no
-    // transactions shows as a gap in the line, not a skipped x-axis step
-    // that quietly compresses the timeline.
+    // Zero-fill every already-elapsed day in the selected range so a day
+    // with no transactions shows as a gap in the line, not a skipped
+    // x-axis step. Days that haven't happened yet are left alone here —
+    // they're covered by the projection below, not backfilled as zero
+    // actuals (which would otherwise show the real line diving to 0).
     if (from && to) {
-      const [fy, fm, fd] = from.split('-').map(Number)
-      const [ty, tm, td] = to.split('-').map(Number)
-      for (let d = new Date(fy, fm - 1, fd); d <= new Date(ty, tm - 1, td); d.setDate(d.getDate() + 1)) {
-        bucket(toISODate(d))
-      }
-      // Bridge point: give the last actual day a projected value too, equal
-      // to its actual value, so the dashed projected line starts exactly
-      // where the solid actual line ends instead of jumping in with a gap.
-      const lastActual = map.get(to)
-      if (lastActual) {
-        lastActual.projIncome = lastActual.income
-        lastActual.projExpense = lastActual.expense
+      const actualEnd = to < today ? to : today
+      if (from <= actualEnd) {
+        const [fy, fm, fd] = from.split('-').map(Number)
+        const [ay, am, ad] = actualEnd.split('-').map(Number)
+        for (let d = new Date(fy, fm - 1, fd); d <= new Date(ay, am - 1, ad); d.setDate(d.getDate() + 1)) {
+          bucket(toISODate(d))
+        }
+        // Bridge point: give the last actual day a projected value too,
+        // equal to its actual value, so the dashed projected line starts
+        // exactly where the solid actual line ends instead of a gap.
+        const bridge = map.get(actualEnd)
+        if (bridge) {
+          bridge.projIncome = bridge.income
+          bridge.projExpense = bridge.expense
+        }
       }
     }
     if (projectionWindow) {
@@ -255,7 +260,7 @@ export default function DashboardPage() {
       }
     }
     return [...map.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
-  }, [filteredIncome, filteredExpenses, filteredFuel, from, to, projectionWindow, projectionBasis])
+  }, [filteredIncome, filteredExpenses, filteredFuel, from, to, today, projectionWindow, projectionBasis])
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
@@ -321,9 +326,9 @@ export default function DashboardPage() {
               <p className={`font-semibold ${net >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                 {formatMVR(net)}
               </p>
-              {projectedNextMonth != null && (
+              {projectedMonthEnd != null && (
                 <p className="text-[11px] text-gray-400 dark:text-gray-500">
-                  Next month (projected): {formatMVR(projectedNextMonth)}
+                  Expected by month end: {formatMVR(projectedMonthEnd)}
                 </p>
               )}
             </div>
