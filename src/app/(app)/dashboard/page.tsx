@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
   Legend,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -16,7 +16,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
 import DateRangeFilter from '@/components/DateRangeFilter'
 import type { Vessel } from '@/lib/types'
-import { currentMonthRange } from '@/lib/dateRange'
+import { currentMonthRange, toISODate } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
 
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
@@ -158,18 +158,28 @@ export default function DashboardPage() {
     return rows.sort((a, b) => b.income - b.expense - (a.income - a.expense))
   }, [vessels, filteredExpenses, filteredFuel, filteredIncome, filteredPassengerTotals])
 
-  const monthly = useMemo(() => {
-    const map = new Map<string, { month: string; income: number; expense: number }>()
+  const daily = useMemo(() => {
+    const map = new Map<string, { date: string; income: number; expense: number }>()
     function bucket(date: string) {
-      const month = date.slice(0, 7)
-      if (!map.has(month)) map.set(month, { month, income: 0, expense: 0 })
-      return map.get(month)!
+      const day = date.slice(0, 10)
+      if (!map.has(day)) map.set(day, { date: day, income: 0, expense: 0 })
+      return map.get(day)!
     }
     for (const i of filteredIncome) bucket(i.income_date).income += i.amount
     for (const e of filteredExpenses) bucket(e.expense_date).expense += e.amount
     for (const f of filteredFuel) bucket(f.filled_at).expense += f.cost ?? 0
-    return [...map.values()].sort((a, b) => (a.month < b.month ? -1 : 1))
-  }, [filteredIncome, filteredExpenses, filteredFuel])
+    // Zero-fill every day in the selected range so a day with no
+    // transactions shows as a gap in the line, not a skipped x-axis step
+    // that quietly compresses the timeline.
+    if (from && to) {
+      const [fy, fm, fd] = from.split('-').map(Number)
+      const [ty, tm, td] = to.split('-').map(Number)
+      for (let d = new Date(fy, fm - 1, fd); d <= new Date(ty, tm - 1, td); d.setDate(d.getDate() + 1)) {
+        bucket(toISODate(d))
+      }
+    }
+    return [...map.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
+  }, [filteredIncome, filteredExpenses, filteredFuel, from, to])
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
@@ -233,18 +243,39 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {monthly.length > 0 && (
+          {daily.length > 0 && (
             <div className="h-56 rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-2">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthly}>
+                <LineChart data={daily}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-neutral-800" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(d: string) => d.slice(8, 10)}
+                    minTickGap={16}
+                  />
                   <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip formatter={(v: number) => formatMVR(v)} />
+                  <Tooltip formatter={(v: number) => formatMVR(v)} labelFormatter={(d: string) => d} />
                   <Legend />
-                  <Bar dataKey="income" fill="#059669" name="Income" />
-                  <Bar dataKey="expense" fill="#dc2626" name="Expense" />
-                </BarChart>
+                  <Line
+                    type="monotone"
+                    dataKey="income"
+                    stroke="#059669"
+                    name="Income"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="expense"
+                    stroke="#dc2626"
+                    name="Expense"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                  />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           )}
