@@ -8,16 +8,20 @@ import type { Vessel } from '@/lib/types'
 import { currentMonthRange } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
 import { SkeletonList } from '@/components/Skeleton'
+import { computeIncomeTaxBreakdown } from '@/lib/tax'
 
 type ExpenseRow = { vessel_id: string | null; category: string; amount: number; expense_date: string }
-type IncomeRow = { vessel_id: string | null; amount: number; income_date: string; is_tax_free: boolean }
+type IncomeRow = { id: string; vessel_id: string | null; amount: number; income_date: string; is_tax_free: boolean }
 type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
+type LineTotals = { taxFreeAmount: number; taxableAmount: number }
 
 export default function ReportsPage() {
   const supabase = createClient()
   const [vessels, setVessels] = useState<Vessel[]>([])
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
+  const [incomeLineTotals, setIncomeLineTotals] = useState<Record<string, LineTotals>>({})
+  const [taxPercent, setTaxPercent] = useState(0)
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -34,19 +38,31 @@ export default function ReportsPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [vesselsRes, expensesRes, incomeRes, fuelRes] = await Promise.all([
+      const [vesselsRes, expensesRes, incomeRes, incomeLinesRes, settingsRes, fuelRes] = await Promise.all([
         supabase.from('vessels').select('id, name, notes, created_at').order('name'),
         supabase.from('expenses').select('vessel_id, category, amount, expense_date'),
-        supabase.from('income_entries').select('vessel_id, amount, income_date, is_tax_free'),
+        supabase.from('income_entries').select('id, vessel_id, amount, income_date, is_tax_free'),
+        supabase.from('income_entry_line_totals').select('income_entry_id, tax_free_amount, taxable_amount'),
+        supabase.from('app_settings').select('tax_percent').eq('id', true).maybeSingle(),
         supabase.from('fuel_entry_cost').select('vessel_id, cost, filled_at'),
       ])
       if (vesselsRes.error) throw vesselsRes.error
       if (expensesRes.error) throw expensesRes.error
       if (incomeRes.error) throw incomeRes.error
+      if (incomeLinesRes.error) throw incomeLinesRes.error
+      if (settingsRes.error) throw settingsRes.error
       if (fuelRes.error) throw fuelRes.error
       setVessels((vesselsRes.data as Vessel[]) ?? [])
       setExpenses((expensesRes.data as ExpenseRow[]) ?? [])
       setIncome((incomeRes.data as IncomeRow[]) ?? [])
+      const groupedLines: Record<string, LineTotals> = {}
+      for (const l of (incomeLinesRes.data as
+        | { income_entry_id: string; tax_free_amount: number; taxable_amount: number }[]
+        | null) ?? []) {
+        groupedLines[l.income_entry_id] = { taxFreeAmount: l.tax_free_amount, taxableAmount: l.taxable_amount }
+      }
+      setIncomeLineTotals(groupedLines)
+      setTaxPercent(settingsRes.data?.tax_percent ?? 0)
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load the report.')
@@ -72,11 +88,19 @@ export default function ReportsPage() {
   )
 
   const totalIncome = useMemo(() => filteredIncome.reduce((s, i) => s + i.amount, 0), [filteredIncome])
-  const taxFreeIncome = useMemo(
-    () => filteredIncome.filter((i) => i.is_tax_free).reduce((s, i) => s + i.amount, 0),
-    [filteredIncome]
-  )
-  const taxableIncome = totalIncome - taxFreeIncome
+  // An imported "whole file" entry can mix tax-free and taxable passengers
+  // under one entry — its own is_tax_free flag isn't reliable, the per-line
+  // totals are. computeIncomeTaxBreakdown prefers those when present.
+  const { taxFreeIncome, taxableIncome } = useMemo(() => {
+    let taxFree = 0
+    let taxable = 0
+    for (const i of filteredIncome) {
+      const b = computeIncomeTaxBreakdown(i.amount, i.is_tax_free, incomeLineTotals[i.id], taxPercent)
+      taxFree += b.taxFreeAmount
+      taxable += b.taxableAmount
+    }
+    return { taxFreeIncome: taxFree, taxableIncome: taxable }
+  }, [filteredIncome, incomeLineTotals, taxPercent])
 
   const fuelTotal = useMemo(() => filteredFuel.reduce((s, f) => s + (f.cost ?? 0), 0), [filteredFuel])
 
