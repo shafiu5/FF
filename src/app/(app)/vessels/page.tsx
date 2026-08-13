@@ -112,11 +112,11 @@ export default function VesselsPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <h1 className="text-2xl font-bold">Vessels</h1>
+      <h1 className="text-2xl font-bold">Books</h1>
 
       <div className="flex rounded-lg border border-gray-300 dark:border-neutral-700 overflow-hidden">
         <button type="button" onClick={() => setTab('vessels')} className={tabButtonClass(tab === 'vessels')}>
-          Vessels
+          Books
         </button>
         <button type="button" onClick={() => setTab('reports')} className={tabButtonClass(tab === 'reports')}>
           Income Statement

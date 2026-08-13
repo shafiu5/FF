@@ -184,7 +184,7 @@ export default function VesselDetailPage() {
         className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-300"
       >
           <ArrowLeft size={16} strokeWidth={1.75} />
-          Vessels
+          Books
         </Link>
         <p className="text-gray-400 dark:text-gray-500">Vessel not found.</p>
       </main>
@@ -198,7 +198,7 @@ export default function VesselDetailPage() {
         className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-300"
       >
         <ArrowLeft size={16} strokeWidth={1.75} />
-        Vessels
+        Books
       </Link>
       <div>
         <h1 className="text-2xl font-bold mb-3">{vessel.name}</h1>
