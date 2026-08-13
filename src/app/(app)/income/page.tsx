@@ -11,6 +11,7 @@ import { computeIncomeTaxBreakdown } from '@/lib/tax'
 import { matchesOmitRule } from '@/lib/xlsxImport'
 import { currentMonthRange } from '@/lib/dateRange'
 import Skeleton, { SkeletonList } from '@/components/Skeleton'
+import Logo from '@/components/Logo'
 
 type VesselOption = { id: string; name: string }
 type IncomeRow = {
@@ -209,7 +210,10 @@ export default function IncomePage() {
   )
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <h1 className="text-2xl font-bold">Income</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Income</h1>
+        <Logo />
+      </div>
 
       <div className="flex items-center justify-between gap-2">
         <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />

@@ -11,6 +11,7 @@ import type { Vessel } from '@/lib/types'
 import { currentMonthRange } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
 import Skeleton, { SkeletonList } from '@/components/Skeleton'
+import Logo from '@/components/Logo'
 
 type ExpenseRow = { id: string; category: string; amount: number; expense_date: string; vendor: string }
 type IncomeRow = {
@@ -193,13 +194,16 @@ export default function VesselDetailPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-      <Link
-        href="/vessels"
-        className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-300"
-      >
-        <ArrowLeft size={16} strokeWidth={1.75} />
-        Books
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link
+          href="/vessels"
+          className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-300"
+        >
+          <ArrowLeft size={16} strokeWidth={1.75} />
+          Books
+        </Link>
+        <Logo />
+      </div>
       <div>
         <h1 className="text-2xl font-bold mb-3">{vessel.name}</h1>
         <div className="grid grid-cols-3 gap-3">

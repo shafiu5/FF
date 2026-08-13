@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft, Upload } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
+import Logo from '@/components/Logo'
 import {
   buildIncomeRows,
   groupIncomeRowsByReference,
@@ -304,13 +305,16 @@ export default function ImportIncomePage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <Link
-        href="/income"
-        className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-300"
-      >
-        <ArrowLeft size={16} strokeWidth={1.75} />
-        Income
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link
+          href="/income"
+          className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-300"
+        >
+          <ArrowLeft size={16} strokeWidth={1.75} />
+          Income
+        </Link>
+        <Logo />
+      </div>
       <h1 className="text-2xl font-bold">Import income from Excel</h1>
 
       {step === 1 && (

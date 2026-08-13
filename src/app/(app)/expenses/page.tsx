@@ -10,6 +10,7 @@ import { computeIncomeTaxBreakdown, extractTax } from '@/lib/tax'
 import { currentMonthRange } from '@/lib/dateRange'
 import SalaryPanel from '@/components/SalaryPanel'
 import { SkeletonList } from '@/components/Skeleton'
+import Logo from '@/components/Logo'
 
 type VesselOption = { id: string; name: string }
 type ExpenseRow = {
@@ -356,7 +357,10 @@ export default function ExpensesPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <h1 className="text-2xl font-bold">Expenses</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Expenses</h1>
+        <Logo />
+      </div>
 
       <div className="flex rounded-lg border border-gray-300 dark:border-neutral-700 overflow-hidden">
         <button

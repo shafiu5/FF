@@ -19,6 +19,7 @@ import type { Vessel } from '@/lib/types'
 import { currentMonthRange, toISODate } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
 import Skeleton from '@/components/Skeleton'
+import Logo from '@/components/Logo'
 
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
 type IncomeRow = { vessel_id: string | null; amount: number; income_date: string; is_tax_free: boolean }
@@ -314,7 +315,10 @@ export default function DashboardPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <Logo />
+      </div>
 
       {loading ? (
         <div className="space-y-6">

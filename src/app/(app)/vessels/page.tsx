@@ -10,6 +10,7 @@ import { currentMonthRange } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
 import { SkeletonList } from '@/components/Skeleton'
 import IncomeStatement from '@/components/IncomeStatement'
+import Logo from '@/components/Logo'
 
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
 type IncomeRow = { vessel_id: string | null; amount: number; income_date: string }
@@ -112,7 +113,10 @@ export default function VesselsPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <h1 className="text-2xl font-bold">Books</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Books</h1>
+        <Logo />
+      </div>
 
       <div className="flex rounded-lg border border-gray-300 dark:border-neutral-700 overflow-hidden">
         <button type="button" onClick={() => setTab('vessels')} className={tabButtonClass(tab === 'vessels')}>
