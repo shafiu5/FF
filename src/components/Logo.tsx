@@ -10,7 +10,7 @@ export default function Logo() {
 
   return (
     <div className="print:hidden fixed top-0 inset-x-0 z-30 pointer-events-none">
-      <div className="max-w-2xl mx-auto px-4 py-3 flex justify-end">
+      <div className="max-w-2xl mx-auto px-4 pt-7 pb-2 flex justify-end">
         <Link href="/dashboard" className="pointer-events-auto transition-opacity hover:opacity-80">
           <Image
             src="/logo.png"
