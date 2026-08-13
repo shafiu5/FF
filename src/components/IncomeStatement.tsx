@@ -15,7 +15,7 @@ type IncomeRow = { id: string; vessel_id: string | null; amount: number; income_
 type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
 type LineTotals = { taxFreeAmount: number; taxableAmount: number }
 
-export default function ReportsPage() {
+export default function IncomeStatement() {
   const supabase = createClient()
   const [vessels, setVessels] = useState<Vessel[]>([])
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
@@ -118,9 +118,7 @@ export default function ReportsPage() {
   const margin = profitMargin(totalIncome, totalExpense)
 
   return (
-    <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <h1 className="text-2xl font-bold">Reports</h1>
-
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         <select
@@ -217,6 +215,6 @@ export default function ReportsPage() {
           </div>
         </div>
       )}
-    </main>
+    </div>
   )
 }

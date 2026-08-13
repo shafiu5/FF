@@ -9,14 +9,23 @@ import DateRangeFilter from '@/components/DateRangeFilter'
 import { currentMonthRange } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
 import { SkeletonList } from '@/components/Skeleton'
+import IncomeStatement from '@/components/IncomeStatement'
 
 type ExpenseRow = { vessel_id: string | null; amount: number; expense_date: string }
 type IncomeRow = { vessel_id: string | null; amount: number; income_date: string }
 type FuelCostRow = { vessel_id: string; cost: number | null; filled_at: string }
 type PassengerTotalRow = { vessel_id: string | null; income_date: string; passenger_count: number }
 
+const tabButtonClass = (active: boolean) =>
+  `flex-1 py-2 text-sm font-medium transition-colors ${
+    active
+      ? 'bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white'
+      : 'bg-white dark:bg-neutral-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-neutral-800 active:bg-gray-100 dark:active:bg-neutral-700'
+  }`
+
 export default function VesselsPage() {
   const supabase = createClient()
+  const [tab, setTab] = useState<'vessels' | 'reports'>('vessels')
   const [vessels, setVessels] = useState<Vessel[]>([])
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
@@ -105,9 +114,21 @@ export default function VesselsPage() {
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
       <h1 className="text-2xl font-bold">Vessels</h1>
 
-      <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+      <div className="flex rounded-lg border border-gray-300 dark:border-neutral-700 overflow-hidden">
+        <button type="button" onClick={() => setTab('vessels')} className={tabButtonClass(tab === 'vessels')}>
+          Vessels
+        </button>
+        <button type="button" onClick={() => setTab('reports')} className={tabButtonClass(tab === 'reports')}>
+          Income Statement
+        </button>
+      </div>
 
-      {loading ? (
+      {tab === 'reports' && <IncomeStatement />}
+
+      {tab === 'vessels' && <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />}
+
+      {tab === 'vessels' &&
+        (loading ? (
         <SkeletonList withHeading={false} />
       ) : loadError ? (
         <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
@@ -181,7 +202,7 @@ export default function VesselsPage() {
             </div>
           )}
         </div>
-      )}
+      ))}
     </main>
   )
 }
