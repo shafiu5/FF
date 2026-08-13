@@ -16,6 +16,13 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  const [userEmail, setUserEmail] = useState('')
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameSaved, setNameSaved] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [myCollaboration, setMyCollaboration] = useState<{ owner_email: string; can_edit: boolean } | null>(null)
+
   const [reference, setReference] = useState('')
   const [contact, setContact] = useState('')
   const [label, setLabel] = useState('')
@@ -38,17 +45,25 @@ export default function SettingsPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [rulesRes, settingsRes, collaboratorsRes] = await Promise.all([
+      const [userRes, rulesRes, settingsRes, collaboratorsRes, myCollabRes] = await Promise.all([
+        supabase.auth.getUser(),
         supabase.from('omit_rules').select('*').order('created_at', { ascending: false }),
         supabase.from('app_settings').select('tax_percent').maybeSingle(),
         supabase.from('account_collaborators').select('*').order('created_at', { ascending: false }),
+        supabase.rpc('my_collaboration'),
       ])
+      setUserEmail(userRes.data.user?.email ?? '')
+      setNameInput((userRes.data.user?.user_metadata?.full_name as string) ?? '')
       if (rulesRes.error) throw rulesRes.error
       if (settingsRes.error) throw settingsRes.error
       if (collaboratorsRes.error) throw collaboratorsRes.error
       setRules((rulesRes.data as OmitRule[]) ?? [])
       setTaxPercentInput(String(settingsRes.data?.tax_percent ?? 0))
       setCollaborators((collaboratorsRes.data as AccountCollaborator[]) ?? [])
+      // Non-fatal: my_collaboration() is new and may not exist yet if that
+      // migration hasn't been run, and it's only used for a display hint.
+      const collabRows = (myCollabRes.data as { owner_email: string; can_edit: boolean }[]) ?? []
+      setMyCollaboration(myCollabRes.error ? null : (collabRows[0] ?? null))
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load settings.')
     } finally {
@@ -59,6 +74,20 @@ export default function SettingsPage() {
   useEffect(() => {
     load()
   }, [])
+
+  async function saveName(e: FormEvent) {
+    e.preventDefault()
+    setSavingName(true)
+    setNameSaved(false)
+    setNameError(null)
+    const { error } = await supabase.auth.updateUser({ data: { full_name: nameInput.trim() } })
+    setSavingName(false)
+    if (error) {
+      setNameError(error.message)
+      return
+    }
+    setNameSaved(true)
+  }
 
   async function saveTaxPercent(e: FormEvent) {
     e.preventDefault()
@@ -147,6 +176,51 @@ export default function SettingsPage() {
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
+
+      <section>
+        <h2 className="font-semibold mb-1">Profile</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+          The login and account currently in use on this device.
+        </p>
+        <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 space-y-3">
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Email</p>
+            <p className="font-medium">{userEmail || '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Account</p>
+            <p className="font-medium">
+              {myCollaboration
+                ? `Viewing ${myCollaboration.owner_email}'s account — ${
+                    myCollaboration.can_edit ? 'can edit' : 'view only'
+                  }`
+                : 'You own this account'}
+            </p>
+          </div>
+          <form onSubmit={saveName} className="flex items-end gap-3 pt-1">
+            <div className="flex-1">
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Name (optional)</label>
+              <input
+                value={nameInput}
+                onChange={(e) => {
+                  setNameInput(e.target.value)
+                  setNameSaved(false)
+                }}
+                placeholder="Your name"
+                className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2"
+              />
+            </div>
+            <button
+              disabled={savingName}
+              className="rounded-lg bg-sky-600 text-white px-4 py-2 text-sm font-medium transition-colors hover:bg-sky-700 active:bg-sky-800 disabled:opacity-50 disabled:hover:bg-sky-600"
+            >
+              {savingName ? 'Saving…' : 'Save'}
+            </button>
+          </form>
+          {nameError && <p className="text-sm text-red-600 dark:text-red-400">{nameError}</p>}
+          {nameSaved && <p className="text-sm text-emerald-600 dark:text-emerald-400">Name updated.</p>}
+        </div>
+      </section>
 
       <section>
         <h2 className="font-semibold mb-1">Collaborators</h2>
