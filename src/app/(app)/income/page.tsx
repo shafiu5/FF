@@ -209,8 +209,10 @@ export default function IncomePage() {
   )
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Income</h1>
+      <h1 className="text-2xl font-bold">Income</h1>
+
+      <div className="flex items-center justify-between gap-2">
+        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         <div className="flex gap-2">
           <Link
             href="/income/import"
@@ -305,8 +307,6 @@ export default function IncomePage() {
           </button>
         </form>
       )}
-
-      <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
 
       {loading ? (
         <SkeletonList />

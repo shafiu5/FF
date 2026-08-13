@@ -356,18 +356,7 @@ export default function ExpensesPage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Expenses</h1>
-        {tab === 'expenses' && (
-          <button
-            onClick={() => setShowAdd((v) => !v)}
-            className="flex items-center gap-1.5 rounded-lg bg-sky-600 text-white px-4 py-2 text-sm font-medium transition-colors hover:bg-sky-700 active:bg-sky-800"
-          >
-            {showAdd ? <X size={16} strokeWidth={1.75} /> : <Plus size={16} strokeWidth={1.75} />}
-            {showAdd ? 'Cancel' : 'Add expense'}
-          </button>
-        )}
-      </div>
+      <h1 className="text-2xl font-bold">Expenses</h1>
 
       <div className="flex rounded-lg border border-gray-300 dark:border-neutral-700 overflow-hidden">
         <button
@@ -406,6 +395,21 @@ export default function ExpensesPage() {
       </div>
 
       {tab === 'salary' && <SalaryPanel />}
+
+      {tab !== 'salary' && (
+        <div className="flex items-center justify-between gap-2">
+          <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {tab === 'expenses' && (
+            <button
+              onClick={() => setShowAdd((v) => !v)}
+              className="flex items-center gap-1.5 rounded-lg bg-sky-600 text-white px-4 py-2 text-sm font-medium transition-colors hover:bg-sky-700 active:bg-sky-800"
+            >
+              {showAdd ? <X size={16} strokeWidth={1.75} /> : <Plus size={16} strokeWidth={1.75} />}
+              {showAdd ? 'Cancel' : 'Add expense'}
+            </button>
+          )}
+        </div>
+      )}
 
       {tab === 'expenses' && showAdd && (
         <form
@@ -506,8 +510,6 @@ export default function ExpensesPage() {
           </button>
         </form>
       )}
-
-      {tab !== 'salary' && <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />}
 
       {tab === 'expenses' &&
         (loading ? (
