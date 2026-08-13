@@ -78,6 +78,14 @@ export type OmitRule = {
   created_at: string
 }
 
+export type AccountCollaborator = {
+  id: string
+  owner_id: string
+  collaborator_email: string
+  can_edit: boolean
+  created_at: string
+}
+
 export type Employee = {
   id: string
   name: string

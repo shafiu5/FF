@@ -78,7 +78,7 @@ export default function IncomePage() {
             'id, vessel_id, amount, income_date, reference, description, is_tax_free, source, vessels(name), income_entry_lines(count)'
           )
           .order('income_date', { ascending: false }),
-        supabase.from('app_settings').select('tax_percent').eq('id', true).maybeSingle(),
+        supabase.from('app_settings').select('tax_percent').maybeSingle(),
         supabase.from('omit_rules').select('reference, contact'),
         supabase.from('income_entry_line_totals').select('income_entry_id, tax_free_amount, taxable_amount'),
       ])

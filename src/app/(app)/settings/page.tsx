@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { LogOut, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import type { OmitRule } from '@/lib/types'
+import type { OmitRule, AccountCollaborator } from '@/lib/types'
 import { SkeletonList } from '@/components/Skeleton'
 
 export default function SettingsPage() {
@@ -12,6 +12,7 @@ export default function SettingsPage() {
   const supabase = createClient()
 
   const [rules, setRules] = useState<OmitRule[]>([])
+  const [collaborators, setCollaborators] = useState<AccountCollaborator[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -20,6 +21,11 @@ export default function SettingsPage() {
   const [label, setLabel] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const [collaboratorEmail, setCollaboratorEmail] = useState('')
+  const [collaboratorCanEdit, setCollaboratorCanEdit] = useState(false)
+  const [savingCollaborator, setSavingCollaborator] = useState(false)
+  const [collaboratorError, setCollaboratorError] = useState<string | null>(null)
 
   const [taxPercentInput, setTaxPercentInput] = useState('0')
   const [savingTax, setSavingTax] = useState(false)
@@ -32,14 +38,17 @@ export default function SettingsPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [rulesRes, settingsRes] = await Promise.all([
+      const [rulesRes, settingsRes, collaboratorsRes] = await Promise.all([
         supabase.from('omit_rules').select('*').order('created_at', { ascending: false }),
-        supabase.from('app_settings').select('tax_percent').eq('id', true).maybeSingle(),
+        supabase.from('app_settings').select('tax_percent').maybeSingle(),
+        supabase.from('account_collaborators').select('*').order('created_at', { ascending: false }),
       ])
       if (rulesRes.error) throw rulesRes.error
       if (settingsRes.error) throw settingsRes.error
+      if (collaboratorsRes.error) throw collaboratorsRes.error
       setRules((rulesRes.data as OmitRule[]) ?? [])
       setTaxPercentInput(String(settingsRes.data?.tax_percent ?? 0))
+      setCollaborators((collaboratorsRes.data as AccountCollaborator[]) ?? [])
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load settings.')
     } finally {
@@ -58,14 +67,47 @@ export default function SettingsPage() {
     setTaxSaved(false)
     const { error } = await supabase
       .from('app_settings')
-      .update({ tax_percent: Number(taxPercentInput), updated_at: new Date().toISOString() })
-      .eq('id', true)
+      .upsert(
+        { tax_percent: Number(taxPercentInput), updated_at: new Date().toISOString() },
+        { onConflict: 'owner_id' }
+      )
     setSavingTax(false)
     if (error) {
       setTaxError(error.message)
       return
     }
     setTaxSaved(true)
+  }
+
+  async function addCollaborator(e: FormEvent) {
+    e.preventDefault()
+    const email = collaboratorEmail.trim().toLowerCase()
+    if (!email) return
+    setSavingCollaborator(true)
+    setCollaboratorError(null)
+    const { error } = await supabase
+      .from('account_collaborators')
+      .insert({ collaborator_email: email, can_edit: collaboratorCanEdit })
+    setSavingCollaborator(false)
+    if (error) {
+      setCollaboratorError(
+        error.message.toLowerCase().includes('duplicate') ? 'Already added.' : error.message
+      )
+      return
+    }
+    setCollaboratorEmail('')
+    setCollaboratorCanEdit(false)
+    load()
+  }
+
+  async function removeCollaborator(id: string) {
+    await supabase.from('account_collaborators').delete().eq('id', id)
+    load()
+  }
+
+  async function toggleCollaboratorEdit(c: AccountCollaborator) {
+    await supabase.from('account_collaborators').update({ can_edit: !c.can_edit }).eq('id', c.id)
+    load()
   }
 
   async function addRule(e: FormEvent) {
@@ -105,6 +147,81 @@ export default function SettingsPage() {
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
+
+      <section>
+        <h2 className="font-semibold mb-1">Collaborators</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+          Your data is private to your login by default. Add an email here to give that person
+          access to your account — view-only by default, or tick &quot;Can edit&quot; to let them
+          add/edit/delete too (e.g. someone who needs to log fuel entries on your behalf).
+        </p>
+        <form
+          onSubmit={addCollaborator}
+          className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 space-y-3 mb-3"
+        >
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Email</label>
+              <input
+                type="email"
+                value={collaboratorEmail}
+                onChange={(e) => setCollaboratorEmail(e.target.value)}
+                placeholder="someone@example.com"
+                className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2"
+              />
+            </div>
+            <button
+              disabled={savingCollaborator}
+              className="rounded-lg bg-sky-600 text-white px-4 py-2 text-sm font-medium transition-colors hover:bg-sky-700 active:bg-sky-800 disabled:opacity-50 disabled:hover:bg-sky-600"
+            >
+              {savingCollaborator ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={collaboratorCanEdit}
+              onChange={(e) => setCollaboratorCanEdit(e.target.checked)}
+              className="rounded border-gray-300 dark:border-neutral-700"
+            />
+            Can edit (add/edit/delete, not just view)
+          </label>
+        </form>
+        {collaboratorError && <p className="mb-3 text-sm text-red-600 dark:text-red-400">{collaboratorError}</p>}
+        {collaborators.length === 0 ? (
+          <p className="text-sm text-gray-400 dark:text-gray-500">No collaborators added yet.</p>
+        ) : (
+          <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-gray-100 dark:divide-neutral-800 overflow-hidden">
+            {collaborators.map((c) => (
+              <div
+                key={c.id}
+                className="flex items-center justify-between px-4 py-3 text-sm transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800/60"
+              >
+                <div>
+                  <p className="font-medium">{c.collaborator_email}</p>
+                  <button
+                    onClick={() => toggleCollaboratorEdit(c)}
+                    className={`text-xs rounded px-1.5 py-0.5 border transition-colors ${
+                      c.can_edit
+                        ? 'text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+                        : 'text-gray-500 dark:text-gray-400 border-gray-300 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800'
+                    }`}
+                  >
+                    {c.can_edit ? 'Can edit — click to make view-only' : 'View only — click to allow editing'}
+                  </button>
+                </div>
+                <button
+                  onClick={() => removeCollaborator(c.id)}
+                  className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 p-1.5 -m-1.5 rounded-md transition-colors hover:bg-red-50 dark:hover:bg-red-950/30 active:bg-red-100 dark:active:bg-red-950/50"
+                  aria-label="Remove"
+                >
+                  <Trash2 size={16} strokeWidth={1.75} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section>
         <h2 className="font-semibold mb-1">Tax rate</h2>

@@ -118,7 +118,7 @@ export default function ExpensesPage() {
           .from('fuel_entry_cost')
           .select('id, vessel_id, quantity, cost, filled_at')
           .order('filled_at', { ascending: false }),
-        supabase.from('app_settings').select('tax_percent').eq('id', true).maybeSingle(),
+        supabase.from('app_settings').select('tax_percent').maybeSingle(),
         supabase.from('income_entries').select('id, amount, income_date, is_tax_free'),
         supabase.from('income_entry_line_totals').select('income_entry_id, tax_free_amount, taxable_amount'),
       ])

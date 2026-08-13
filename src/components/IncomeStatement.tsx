@@ -45,7 +45,7 @@ export default function IncomeStatement() {
         supabase.from('expenses').select('vessel_id, category, amount, expense_date'),
         supabase.from('income_entries').select('id, vessel_id, amount, income_date, is_tax_free'),
         supabase.from('income_entry_line_totals').select('income_entry_id, tax_free_amount, taxable_amount'),
-        supabase.from('app_settings').select('tax_percent').eq('id', true).maybeSingle(),
+        supabase.from('app_settings').select('tax_percent').maybeSingle(),
         supabase.from('fuel_entry_cost').select('vessel_id, cost, filled_at'),
       ])
       if (vesselsRes.error) throw vesselsRes.error
