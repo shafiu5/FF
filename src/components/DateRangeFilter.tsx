@@ -74,7 +74,7 @@ export default function DateRangeFilter({ from, to, onFromChange, onToChange }: 
     : 'All dates'
 
   return (
-    <div className="relative mb-2 inline-block" ref={containerRef}>
+    <div className="relative inline-block" ref={containerRef}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
