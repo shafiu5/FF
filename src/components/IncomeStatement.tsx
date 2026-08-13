@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
+import { FileSpreadsheet, Printer } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
 import DateRangeFilter from '@/components/DateRangeFilter'
@@ -117,22 +119,75 @@ export default function IncomeStatement() {
   const netIncome = totalIncome - totalExpense
   const margin = profitMargin(totalIncome, totalExpense)
 
+  const periodLabel = from && to ? `${from} to ${to}` : 'All dates'
+  const vesselLabel = vesselId ? vessels.find((v) => v.id === vesselId)?.name ?? '' : 'All vessels'
+
+  function exportExcel() {
+    const rows: (string | number)[][] = [
+      ['Income Statement'],
+      [periodLabel, vesselLabel],
+      [],
+      ['Revenue'],
+      ['Taxable income', taxableIncome],
+      ['Tax-free income', taxFreeIncome],
+      ['Total revenue', totalIncome],
+      [],
+      ['Expenses'],
+      ...expensesByCategory.map(([category, amount]) => [category, amount]),
+      ['Total expenses', totalExpense],
+      [],
+      ['Net income', netIncome],
+      ['Profit margin', margin == null ? 'n/a' : `${margin.toFixed(1)}%`],
+    ]
+    const worksheet = XLSX.utils.aoa_to_sheet(rows)
+    worksheet['!cols'] = [{ wch: 24 }, { wch: 16 }]
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Income Statement')
+    XLSX.writeFile(workbook, `income-statement-${from || 'all'}-to-${to || 'all'}.xlsx`)
+  }
+
+  function exportPDF() {
+    window.print()
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        <select
-          value={vesselId}
-          onChange={(e) => setVesselId(e.target.value)}
-          className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm"
-        >
-          <option value="">All vessels</option>
-          {vessels.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name}
-            </option>
-          ))}
-        </select>
+      <div className="print:hidden flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          <select
+            value={vesselId}
+            onChange={(e) => setVesselId(e.target.value)}
+            className="rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm"
+          >
+            <option value="">All vessels</option>
+            {vessels.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {!loading && !loadError && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={exportExcel}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-neutral-700 px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800 active:bg-gray-100 dark:active:bg-neutral-700"
+            >
+              <FileSpreadsheet size={16} strokeWidth={1.75} />
+              Excel
+            </button>
+            <button
+              type="button"
+              onClick={exportPDF}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-neutral-700 px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800 active:bg-gray-100 dark:active:bg-neutral-700"
+            >
+              <Printer size={16} strokeWidth={1.75} />
+              PDF
+            </button>
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -152,8 +207,8 @@ export default function IncomeStatement() {
           <div className="px-4 py-3 border-b border-gray-100 dark:border-neutral-800">
             <h2 className="font-semibold">Income Statement</h2>
             <p className="text-xs text-gray-400 dark:text-gray-500">
-              {from && to ? `${from} to ${to}` : 'All dates'}
-              {vesselId && ` · ${vessels.find((v) => v.id === vesselId)?.name}`}
+              {periodLabel}
+              {vesselId && ` · ${vesselLabel}`}
             </p>
           </div>
 

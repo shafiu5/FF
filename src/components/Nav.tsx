@@ -16,7 +16,7 @@ export default function Nav() {
   const pathname = usePathname()
 
   return (
-    <nav className="fixed bottom-0 inset-x-0 bg-white dark:bg-neutral-900 border-t border-gray-200 dark:border-neutral-800 flex justify-around py-2">
+    <nav className="print:hidden fixed bottom-0 inset-x-0 bg-white dark:bg-neutral-900 border-t border-gray-200 dark:border-neutral-800 flex justify-around py-2">
       {ITEMS.map(({ href, label, Icon }) => {
         const active = pathname.startsWith(href)
         return (

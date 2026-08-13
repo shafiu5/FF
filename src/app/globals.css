@@ -19,3 +19,13 @@ body {
     --rdp-accent-background-color: #0c4a6e;
   }
 }
+
+/* Force a plain white/black look when printing (e.g. a report to PDF via
+   the browser's print dialog), regardless of dark mode. */
+@media print {
+  * {
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+  }
+}
