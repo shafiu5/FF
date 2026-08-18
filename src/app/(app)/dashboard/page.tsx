@@ -313,6 +313,12 @@ export default function DashboardPage() {
     return [...map.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
   }, [filteredIncome, filteredExpenses, filteredFuel, from, to, today, projectionWindow, projectionBasis])
 
+  // Only count days that have actually happened (not future/projected-only
+  // days) so the average isn't diluted by days with no data yet.
+  const elapsedDayCount = useMemo(() => daily.filter((d) => d.income !== undefined).length, [daily])
+  const dailyAvgIncome = elapsedDayCount > 0 ? totalIncome / elapsedDayCount : 0
+  const dailyAvgExpense = elapsedDayCount > 0 ? totalExpense / elapsedDayCount : 0
+
   return (
     <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -388,7 +394,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
               <p className="text-xs text-gray-500 dark:text-gray-400">Profit margin (fleet)</p>
               <p
@@ -406,6 +412,11 @@ export default function DashboardPage() {
             <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
               <p className="text-xs text-gray-500 dark:text-gray-400">Passengers</p>
               <p className="font-semibold text-gray-900 dark:text-gray-100">{totalPassengers.toLocaleString()}</p>
+            </div>
+            <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Daily average</p>
+              <p className="font-semibold text-emerald-600 dark:text-emerald-400">{formatMVR(dailyAvgIncome)}</p>
+              <p className="text-[11px] text-red-500 dark:text-red-400">{formatMVR(dailyAvgExpense)} out</p>
             </div>
           </div>
 
