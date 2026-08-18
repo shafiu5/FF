@@ -20,6 +20,31 @@ body {
   }
 }
 
+/* "Nautical navy" dark theme: overrides the specific shades the app's
+   dark: classes already reference (surfaces/borders = neutral, muted
+   text = gray, accent/buttons = sky), so every dark:bg-neutral-900,
+   dark:text-gray-400, bg-sky-600, etc. across the whole app repaints
+   without touching individual components. Light mode and the
+   semantic emerald/red (income/expense) colors are untouched. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-neutral-950: #050f1a;
+    --color-neutral-900: #0a1929;
+    --color-neutral-800: #0f2438;
+    --color-neutral-700: #1a3a52;
+    --color-gray-100: #e8f1f8;
+    --color-gray-300: #b8d0e3;
+    --color-gray-400: #7fa8c9;
+    --color-gray-500: #5a86a8;
+    --color-sky-950: #08202e;
+    --color-sky-800: #1d5670;
+    --color-sky-700: #256a87;
+    --color-sky-600: #2d7d9e;
+    --color-sky-400: #5fb3d9;
+    --color-sky-300: #8fcbe3;
+  }
+}
+
 /* Force a plain white/black look when printing (e.g. a report to PDF via
    the browser's print dialog), regardless of dark mode. */
 @media print {
