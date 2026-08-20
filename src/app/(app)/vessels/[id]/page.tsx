@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, FileSpreadsheet } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
 import DateRangeFilter from '@/components/DateRangeFilter'
@@ -12,8 +12,18 @@ import { currentMonthRange } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
 import Skeleton, { SkeletonList } from '@/components/Skeleton'
 import Logo from '@/components/Logo'
+import { computeIncomeTaxBreakdown } from '@/lib/tax'
+import { exportDetailedReport } from '@/lib/detailedReportExport'
 
-type ExpenseRow = { id: string; category: string; amount: number; expense_date: string; vendor: string }
+type ExpenseRow = {
+  id: string
+  category: string
+  amount: number
+  expense_date: string
+  vendor: string
+  has_tax: boolean
+  tax_amount: number | null
+}
 type IncomeRow = {
   id: string
   amount: number
@@ -23,6 +33,7 @@ type IncomeRow = {
   is_tax_free: boolean
 }
 type FuelCostRow = { id: string; quantity: number; cost: number | null; filled_at: string }
+type LineTotals = { taxFreeAmount: number; taxableAmount: number }
 
 type TimelineItem = {
   id: string
@@ -39,10 +50,13 @@ export default function VesselDetailPage() {
   const [vessel, setVessel] = useState<Vessel | null>(null)
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [income, setIncome] = useState<IncomeRow[]>([])
+  const [incomeLineTotals, setIncomeLineTotals] = useState<Record<string, LineTotals>>({})
+  const [taxPercent, setTaxPercent] = useState(0)
   const [fuelCosts, setFuelCosts] = useState<FuelCostRow[]>([])
   const [passengerTotals, setPassengerTotals] = useState<{ income_date: string; passenger_count: number }[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [excludeTaxFree, setExcludeTaxFree] = useState(false)
 
   const [from, setFrom] = useState(() => currentMonthRange().from)
   const [to, setTo] = useState(() => currentMonthRange().to)
@@ -55,36 +69,52 @@ export default function VesselDetailPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [vesselRes, expensesRes, incomeRes, fuelRes, passengerLinesRes] = await Promise.all([
-        supabase.from('vessels').select('id, name, notes, created_at').eq('id', id).maybeSingle(),
-        supabase
-          .from('expenses')
-          .select('id, category, amount, expense_date, vendor')
-          .eq('vessel_id', id)
-          .order('expense_date', { ascending: false }),
-        supabase
-          .from('income_entries')
-          .select('id, amount, income_date, reference, description, is_tax_free')
-          .eq('vessel_id', id)
-          .order('income_date', { ascending: false }),
-        supabase
-          .from('fuel_entry_cost')
-          .select('id, quantity, cost, filled_at')
-          .eq('vessel_id', id)
-          .order('filled_at', { ascending: false }),
-        supabase
-          .from('income_entry_line_totals')
-          .select('income_date, passenger_count')
-          .eq('vessel_id', id),
-      ])
+      const [vesselRes, expensesRes, incomeRes, incomeLinesRes, settingsRes, fuelRes, passengerLinesRes] =
+        await Promise.all([
+          supabase.from('vessels').select('id, name, notes, created_at').eq('id', id).maybeSingle(),
+          supabase
+            .from('expenses')
+            .select('id, category, amount, expense_date, vendor, has_tax, tax_amount')
+            .eq('vessel_id', id)
+            .order('expense_date', { ascending: false }),
+          supabase
+            .from('income_entries')
+            .select('id, amount, income_date, reference, description, is_tax_free')
+            .eq('vessel_id', id)
+            .order('income_date', { ascending: false }),
+          supabase
+            .from('income_entry_line_totals')
+            .select('income_entry_id, tax_free_amount, taxable_amount')
+            .eq('vessel_id', id),
+          supabase.from('app_settings').select('tax_percent').maybeSingle(),
+          supabase
+            .from('fuel_entry_cost')
+            .select('id, quantity, cost, filled_at')
+            .eq('vessel_id', id)
+            .order('filled_at', { ascending: false }),
+          supabase
+            .from('income_entry_line_totals')
+            .select('income_date, passenger_count')
+            .eq('vessel_id', id),
+        ])
       if (vesselRes.error) throw vesselRes.error
       if (expensesRes.error) throw expensesRes.error
       if (incomeRes.error) throw incomeRes.error
+      if (incomeLinesRes.error) throw incomeLinesRes.error
+      if (settingsRes.error) throw settingsRes.error
       if (fuelRes.error) throw fuelRes.error
       if (passengerLinesRes.error) throw passengerLinesRes.error
       setVessel(vesselRes.data as Vessel | null)
       setExpenses((expensesRes.data as ExpenseRow[]) ?? [])
       setIncome((incomeRes.data as IncomeRow[]) ?? [])
+      const groupedLines: Record<string, LineTotals> = {}
+      for (const l of (incomeLinesRes.data as
+        | { income_entry_id: string; tax_free_amount: number; taxable_amount: number }[]
+        | null) ?? []) {
+        groupedLines[l.income_entry_id] = { taxFreeAmount: l.tax_free_amount, taxableAmount: l.taxable_amount }
+      }
+      setIncomeLineTotals(groupedLines)
+      setTaxPercent(settingsRes.data?.tax_percent ?? 0)
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
       setPassengerTotals(
         (passengerLinesRes.data as { income_date: string; passenger_count: number }[]) ?? []
@@ -144,6 +174,60 @@ export default function VesselDetailPage() {
     [passengerTotals, from, to]
   )
   const margin = profitMargin(totalIncome, totalExpense)
+
+  const inRange = (date: string) => (!from || date >= from) && (!to || date <= to)
+
+  function exportReport() {
+    const incomeRows = income
+      .filter((i) => inRange(i.income_date))
+      .map((i) => {
+        const b = computeIncomeTaxBreakdown(i.amount, i.is_tax_free, incomeLineTotals[i.id], taxPercent)
+        return {
+          date: i.income_date,
+          vessel: vessel?.name ?? '',
+          reference: i.reference,
+          description: i.description,
+          amount: i.amount,
+          taxFreeAmount: b.taxFreeAmount,
+          taxableAmount: b.taxableAmount,
+          tax: b.tax,
+        }
+      })
+
+    const expenseRows = [
+      ...expenses
+        .filter((e) => inRange(e.expense_date))
+        .map((e) => ({
+          date: e.expense_date,
+          vessel: vessel?.name ?? '',
+          category: e.category,
+          vendor: e.vendor,
+          amount: e.amount,
+          hasTax: e.has_tax,
+          taxAmount: e.tax_amount ?? 0,
+          source: 'Manual',
+        })),
+      ...fuelCosts
+        .filter((f) => f.cost != null && inRange(f.filled_at))
+        .map((f) => ({
+          date: f.filled_at,
+          vessel: vessel?.name ?? '',
+          category: 'Fuel',
+          vendor: `${f.quantity.toLocaleString()} L`,
+          amount: f.cost ?? 0,
+          hasTax: false,
+          taxAmount: 0,
+          source: 'Fuel-tracker',
+        })),
+    ].sort((a, b) => (a.date < b.date ? 1 : -1))
+
+    exportDetailedReport({
+      filename: `${(vessel?.name ?? 'vessel').replace(/\s+/g, '-').toLowerCase()}-report-${from || 'all'}-to-${to || 'all'}.xlsx`,
+      income: incomeRows,
+      expenses: expenseRows,
+      excludeTaxFree,
+    })
+  }
 
   if (loading) {
     return (
@@ -250,7 +334,28 @@ export default function VesselDetailPage() {
 
       <section>
         <h2 className="font-semibold mb-2">Ledger</h2>
-        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={excludeTaxFree}
+                onChange={(e) => setExcludeTaxFree(e.target.checked)}
+                className="rounded border-gray-300 dark:border-neutral-700"
+              />
+              Exclude tax-free
+            </label>
+            <button
+              type="button"
+              onClick={exportReport}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-neutral-700 px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-50 dark:hover:bg-neutral-800 active:bg-gray-100 dark:active:bg-neutral-700"
+            >
+              <FileSpreadsheet size={16} strokeWidth={1.75} />
+              Export Excel
+            </button>
+          </div>
+        </div>
         {filtered.length === 0 ? (
           <p className="text-sm text-gray-400 dark:text-gray-500">No activity in this range.</p>
         ) : (
