@@ -11,6 +11,7 @@ import { currentMonthRange } from '@/lib/dateRange'
 import { formatPercent, profitMargin } from '@/lib/margin'
 import { SkeletonList } from '@/components/Skeleton'
 import { computeIncomeTaxBreakdown } from '@/lib/tax'
+import { useLiveRefresh } from '@/lib/useLiveRefresh'
 
 type ExpenseRow = { vessel_id: string | null; category: string; amount: number; expense_date: string }
 type IncomeRow = { id: string; vessel_id: string | null; amount: number; income_date: string; is_tax_free: boolean }
@@ -36,9 +37,13 @@ export default function IncomeStatement() {
     load()
   }, [])
 
-  async function load() {
-    setLoading(true)
-    setLoadError(null)
+  // `silent` is for background live refreshes: no skeleton flash, and a
+  // failed refresh keeps showing the data already on screen.
+  async function load(silent = false) {
+    if (!silent) {
+      setLoading(true)
+      setLoadError(null)
+    }
     try {
       const [vesselsRes, expensesRes, incomeRes, incomeLinesRes, settingsRes, fuelRes] = await Promise.all([
         supabase.from('vessels').select('id, name, notes, created_at').order('name'),
@@ -66,12 +71,18 @@ export default function IncomeStatement() {
       setIncomeLineTotals(groupedLines)
       setTaxPercent(settingsRes.data?.tax_percent ?? 0)
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
+      setLoadError(null)
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load the report.')
+      if (!silent) setLoadError(err instanceof Error ? err.message : 'Failed to load the report.')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
+
+  useLiveRefresh(
+    ['expenses', 'income_entries', 'income_entry_lines', 'fuel_entries', 'deliveries', 'vessels', 'app_settings'],
+    () => load(true)
+  )
 
   const inRange = (date: string) => (!from || date >= from) && (!to || date <= to)
   const inVessel = (id: string | null) => !vesselId || id === vesselId
@@ -196,7 +207,7 @@ export default function IncomeStatement() {
         <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
           <button
-            onClick={load}
+            onClick={() => load()}
             className="text-sm font-medium text-sky-600 dark:text-sky-400 transition-colors hover:text-sky-700 dark:hover:text-sky-300"
           >
             Retry

@@ -5,6 +5,7 @@ import { Plus, X, Trash2, Pencil, ChevronDown, ChevronRight, ArrowLeft } from 'l
 import { createClient } from '@/lib/supabase/client'
 import { formatMVR } from '@/lib/currency'
 import { SkeletonList } from '@/components/Skeleton'
+import { useLiveRefresh } from '@/lib/useLiveRefresh'
 import type {
   Employee,
   SalaryRun,
@@ -48,9 +49,14 @@ export default function SalaryPanel() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  async function loadAll() {
-    setLoading(true)
-    setLoadError(null)
+  // `silent` is for background live refreshes: no skeleton flash (which
+  // would also unmount any slip being edited), and a failed refresh keeps
+  // showing the data already on screen.
+  async function loadAll(silent = false) {
+    if (!silent) {
+      setLoading(true)
+      setLoadError(null)
+    }
     try {
       const [vesselsRes, employeesRes, runsRes, loansRes, loanBalancesRes] = await Promise.all([
         supabase.from('vessels').select('id, name').order('name'),
@@ -69,10 +75,11 @@ export default function SalaryPanel() {
       setRuns((runsRes.data as SalaryRun[]) ?? [])
       setLoans((loansRes.data as EmployeeLoan[]) ?? [])
       setLoanBalances((loanBalancesRes.data as LoanBalance[]) ?? [])
+      setLoadError(null)
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load salary data.')
+      if (!silent) setLoadError(err instanceof Error ? err.message : 'Failed to load salary data.')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -393,9 +400,11 @@ export default function SalaryPanel() {
 
   const selectedRun = runs.find((r) => r.id === selectedRunId) ?? null
 
-  async function loadRunDetail(runId: string) {
-    setLoadingRun(true)
-    setRunDetailError(null)
+  async function loadRunDetail(runId: string, silent = false) {
+    if (!silent) {
+      setLoadingRun(true)
+      setRunDetailError(null)
+    }
     try {
       const slipsRes = await supabase
         .from('salary_slips')
@@ -404,7 +413,6 @@ export default function SalaryPanel() {
         .order('created_at')
       if (slipsRes.error) throw slipsRes.error
       const slipsData = (slipsRes.data as SalarySlip[]) ?? []
-      setRunSlips(slipsData)
       if (slipsData.length > 0) {
         const slipIds = slipsData.map((s) => s.id)
         const [tripsRes, deductionsRes] = await Promise.all([
@@ -421,26 +429,47 @@ export default function SalaryPanel() {
         for (const t of (tripsRes.data as SalarySlipTrip[]) ?? []) {
           ;(groupedTrips[t.salary_slip_id] ??= []).push(t)
         }
-        setRunTrips(groupedTrips)
         const groupedDeductions: Record<string, SalarySlipDeduction[]> = {}
         for (const d of (deductionsRes.data as SalarySlipDeduction[]) ?? []) {
           ;(groupedDeductions[d.salary_slip_id] ??= []).push(d)
         }
+        // Set slips, trips and deductions together so a live refresh never
+        // renders new slips against stale trips/deductions.
+        setRunSlips(slipsData)
+        setRunTrips(groupedTrips)
         setRunDeductions(groupedDeductions)
       } else {
+        setRunSlips(slipsData)
         setRunTrips({})
         setRunDeductions({})
       }
+      setRunDetailError(null)
     } catch (err) {
-      setRunDetailError(err instanceof Error ? err.message : 'Failed to load this run.')
+      if (!silent) setRunDetailError(err instanceof Error ? err.message : 'Failed to load this run.')
     } finally {
-      setLoadingRun(false)
+      if (!silent) setLoadingRun(false)
     }
   }
 
   useEffect(() => {
     if (view === 'run' && selectedRunId) loadRunDetail(selectedRunId)
   }, [view, selectedRunId])
+
+  useLiveRefresh(
+    [
+      'employees',
+      'employee_loans',
+      'salary_runs',
+      'salary_slips',
+      'salary_slip_trips',
+      'salary_slip_deductions',
+      'vessels',
+    ],
+    () => {
+      loadAll(true)
+      if (view === 'run' && selectedRunId) loadRunDetail(selectedRunId, true)
+    }
+  )
 
   function slipTotal(slip: SalarySlip): number {
     const tripsTotal = (runTrips[slip.id] ?? []).reduce((s, t) => s + t.amount, 0)
@@ -677,7 +706,7 @@ export default function SalaryPanel() {
       <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
         <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
         <button
-          onClick={loadAll}
+          onClick={() => loadAll()}
           className="text-sm font-medium text-sky-600 dark:text-sky-400 transition-colors hover:text-sky-700 dark:hover:text-sky-300"
         >
           Retry

@@ -14,6 +14,7 @@ import Skeleton, { SkeletonList } from '@/components/Skeleton'
 import Logo from '@/components/Logo'
 import { computeIncomeTaxBreakdown } from '@/lib/tax'
 import { exportDetailedReport } from '@/lib/detailedReportExport'
+import { useLiveRefresh } from '@/lib/useLiveRefresh'
 
 type ExpenseRow = {
   id: string
@@ -65,9 +66,13 @@ export default function VesselDetailPage() {
     if (id) load()
   }, [id])
 
-  async function load() {
-    setLoading(true)
-    setLoadError(null)
+  // `silent` is for background live refreshes: no skeleton flash, and a
+  // failed refresh keeps showing the data already on screen.
+  async function load(silent = false) {
+    if (!silent) {
+      setLoading(true)
+      setLoadError(null)
+    }
     try {
       const [vesselRes, expensesRes, incomeRes, incomeLinesRes, settingsRes, fuelRes, passengerLinesRes] =
         await Promise.all([
@@ -119,12 +124,20 @@ export default function VesselDetailPage() {
       setPassengerTotals(
         (passengerLinesRes.data as { income_date: string; passenger_count: number }[]) ?? []
       )
+      setLoadError(null)
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load this vessel.')
+      if (!silent) setLoadError(err instanceof Error ? err.message : 'Failed to load this vessel.')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
+
+  useLiveRefresh(
+    ['expenses', 'income_entries', 'income_entry_lines', 'fuel_entries', 'deliveries', 'vessels', 'app_settings'],
+    () => {
+      if (id) load(true)
+    }
+  )
 
   const timeline: TimelineItem[] = useMemo(() => {
     const e: TimelineItem[] = expenses.map((x) => ({
@@ -252,7 +265,7 @@ export default function VesselDetailPage() {
         <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
           <button
-            onClick={load}
+            onClick={() => load()}
             className="text-sm font-medium text-sky-600 dark:text-sky-400 transition-colors hover:text-sky-700 dark:hover:text-sky-300"
           >
             Retry

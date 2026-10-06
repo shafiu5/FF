@@ -14,6 +14,7 @@ import IncomeStatement from '@/components/IncomeStatement'
 import Logo from '@/components/Logo'
 import { computeIncomeTaxBreakdown } from '@/lib/tax'
 import { exportDetailedReport } from '@/lib/detailedReportExport'
+import { useLiveRefresh } from '@/lib/useLiveRefresh'
 
 type ExpenseRow = {
   id: string
@@ -66,9 +67,13 @@ export default function VesselsPage() {
     load()
   }, [])
 
-  async function load() {
-    setLoading(true)
-    setLoadError(null)
+  // `silent` is for background live refreshes: no skeleton flash, and a
+  // failed refresh keeps showing the data already on screen.
+  async function load(silent = false) {
+    if (!silent) {
+      setLoading(true)
+      setLoadError(null)
+    }
     try {
       const [vesselsRes, expensesRes, incomeRes, incomeLinesRes, settingsRes, fuelRes, passengerLinesRes] =
         await Promise.all([
@@ -104,12 +109,18 @@ export default function VesselsPage() {
       setTaxPercent(settingsRes.data?.tax_percent ?? 0)
       setFuelCosts((fuelRes.data as FuelCostRow[]) ?? [])
       setPassengerTotals((passengerLinesRes.data as PassengerTotalRow[]) ?? [])
+      setLoadError(null)
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load vessels.')
+      if (!silent) setLoadError(err instanceof Error ? err.message : 'Failed to load vessels.')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
+
+  useLiveRefresh(
+    ['expenses', 'income_entries', 'income_entry_lines', 'fuel_entries', 'deliveries', 'vessels', 'app_settings'],
+    () => load(true)
+  )
 
   const inRange = (date: string) => (!from || date >= from) && (!to || date <= to)
 
@@ -260,7 +271,7 @@ export default function VesselsPage() {
         <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
           <button
-            onClick={load}
+            onClick={() => load()}
             className="text-sm font-medium text-sky-600 dark:text-sky-400 transition-colors hover:text-sky-700 dark:hover:text-sky-300"
           >
             Retry

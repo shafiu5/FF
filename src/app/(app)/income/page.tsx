@@ -12,6 +12,7 @@ import { matchesOmitRule } from '@/lib/xlsxImport'
 import { currentMonthRange } from '@/lib/dateRange'
 import Skeleton, { SkeletonList } from '@/components/Skeleton'
 import Logo from '@/components/Logo'
+import { useLiveRefresh } from '@/lib/useLiveRefresh'
 
 type VesselOption = { id: string; name: string }
 type IncomeRow = {
@@ -67,9 +68,13 @@ export default function IncomePage() {
     load()
   }, [])
 
-  async function load() {
-    setLoading(true)
-    setLoadError(null)
+  // `silent` is for background live refreshes: no skeleton flash, and a
+  // failed refresh keeps showing the data already on screen.
+  async function load(silent = false) {
+    if (!silent) {
+      setLoading(true)
+      setLoadError(null)
+    }
     try {
       const [vesselsRes, incomeRes, settingsRes, omitRulesRes, lineTotalsRes] = await Promise.all([
         supabase.from('vessels').select('id, name').order('name'),
@@ -99,12 +104,18 @@ export default function IncomePage() {
         grouped[l.income_entry_id] = { taxFreeAmount: l.tax_free_amount, taxableAmount: l.taxable_amount }
       }
       setLineTotals(grouped)
+      setLoadError(null)
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load income.')
+      if (!silent) setLoadError(err instanceof Error ? err.message : 'Failed to load income.')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
+
+  useLiveRefresh(
+    ['income_entries', 'income_entry_lines', 'omit_rules', 'vessels', 'app_settings'],
+    () => load(true)
+  )
 
   async function addIncome(e: FormEvent) {
     e.preventDefault()
@@ -318,7 +329,7 @@ export default function IncomePage() {
         <div className="rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
           <button
-            onClick={load}
+            onClick={() => load()}
             className="text-sm font-medium text-sky-600 dark:text-sky-400 transition-colors hover:text-sky-700 dark:hover:text-sky-300"
           >
             Retry
