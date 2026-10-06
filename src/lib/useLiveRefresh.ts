@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { clearChannelState, setChannelState } from '@/lib/liveStatus'
 
 let channelCounter = 0
 
@@ -28,15 +29,25 @@ export function useLiveRefresh(tables: string[], onChange: () => void, delayMs =
 
     // Unique name per subscription so a remount never collides with a
     // channel that's still tearing down.
-    let channel = supabase.channel(`live-refresh-${++channelCounter}`)
+    const channelId = ++channelCounter
+    let channel = supabase.channel(`live-refresh-${channelId}`)
     for (const table of tablesKey.split(',')) {
       channel = channel.on('postgres_changes', { event: '*', schema: 'public', table }, trigger)
     }
+    setChannelState(channelId, 'connecting')
     let subscribedBefore = false
+    let disposed = false
     channel.subscribe((status) => {
-      if (status !== 'SUBSCRIBED') return
-      if (subscribedBefore) trigger()
-      subscribedBefore = true
+      // removeChannel() below reports CLOSED; don't let that resurrect the
+      // entry we just cleared.
+      if (disposed) return
+      if (status === 'SUBSCRIBED') {
+        setChannelState(channelId, 'live')
+        if (subscribedBefore) trigger()
+        subscribedBefore = true
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        setChannelState(channelId, 'offline')
+      }
     })
 
     const onVisible = () => {
@@ -45,8 +56,10 @@ export function useLiveRefresh(tables: string[], onChange: () => void, delayMs =
     document.addEventListener('visibilitychange', onVisible)
 
     return () => {
+      disposed = true
       clearTimeout(timer)
       document.removeEventListener('visibilitychange', onVisible)
+      clearChannelState(channelId)
       supabase.removeChannel(channel)
     }
   }, [tablesKey, delayMs])
