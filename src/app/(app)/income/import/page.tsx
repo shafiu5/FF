@@ -34,14 +34,32 @@ type PreviewRow = {
   isTaxFree: boolean
   include: boolean
   vesselId: string
+  agentDeduction: number
 }
 
 const FIELD_LABELS: Record<FieldKey, string> = {
   date: 'Date',
   amount: 'Amount',
   reference: 'Reference / contact (grouping key)',
+  contact: 'Mobile / contact (also checked against the tax-free list)',
   description: 'Description',
   name: 'Passenger / customer name',
+  soldBy: 'Sold by (agent sales get the deduction below)',
+}
+
+const DEFAULT_AGENT_DEDUCTION = '20'
+
+// Manifest exports are named like "manifest-trip-76-2026-11-11" — reuse that
+// date as the trip date instead of making it be typed in.
+function dateFromFileName(fileName: string): string | null {
+  const m = fileName.match(/\d{4}-\d{2}-\d{2}/)
+  return m && !isNaN(new Date(m[0]).getTime()) ? m[0] : null
+}
+
+// Marks a line/entry whose amount was reduced for an agent sale, so the
+// original ticket price can be worked out from the saved record later.
+function agentNote(deduction: number): string {
+  return deduction > 0 ? ` (agent −${deduction})` : ''
 }
 
 function stripExtension(fileName: string): string {
@@ -61,11 +79,14 @@ export default function ImportIncomePage() {
     date: null,
     amount: null,
     reference: null,
+    contact: null,
     description: null,
     name: null,
+    soldBy: null,
   })
   const [tripDate, setTripDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [mode, setMode] = useState<ImportMode>('rows')
+  const [agentDeduction, setAgentDeduction] = useState(DEFAULT_AGENT_DEDUCTION)
 
   const [vessels, setVessels] = useState<VesselOption[]>([])
   const [omitRules, setOmitRules] = useState<OmitRuleRow[]>([])
@@ -103,8 +124,19 @@ export default function ImportIncomePage() {
       setOmitRules((omitRulesRes.data as OmitRuleRow[]) ?? [])
       setSheet(parsed)
       setFileDescription(stripExtension(file.name))
+      const nameDate = dateFromFileName(file.name)
+      if (nameDate) setTripDate(nameDate)
+      // Remembered choices win, but any field they don't cover (e.g. a
+      // column that only exists in a newer export format) still gets guessed.
+      const guessed = guessMapping(parsed.headers)
       const remembered = loadMappingPreference(parsed.headers)
-      setMapping(remembered ?? guessMapping(parsed.headers))
+      const merged = { ...guessed }
+      if (remembered) {
+        ;(Object.keys(remembered) as FieldKey[]).forEach((field) => {
+          if (remembered[field] != null) merged[field] = remembered[field]
+        })
+      }
+      setMapping(merged)
       setStep(2)
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Failed to read that file.')
@@ -125,7 +157,8 @@ export default function ImportIncomePage() {
     }
     setParseError(null)
     saveMappingPreference(sheet.headers, mapping)
-    const built = buildIncomeRows(sheet, mapping, omitRules, tripDate)
+    const perTicket = mapping.soldBy != null ? Math.max(0, Number(agentDeduction) || 0) : 0
+    const built = buildIncomeRows(sheet, mapping, omitRules, tripDate, perTicket)
 
     if (mode === 'reference') {
       const grouped = groupIncomeRowsByReference(built)
@@ -136,11 +169,13 @@ export default function ImportIncomePage() {
           name: '',
           date: g.date,
           amount: g.amount,
-          label: g.description || g.reference || `Group ${i + 1}`,
+          label:
+            (g.description || g.reference || `Group ${i + 1}`) + agentNote(g.agentDeduction),
           passengerCount: g.passengerCount,
           isTaxFree: g.isTaxFree,
           include: g.amount > 0,
           vesselId: '',
+          agentDeduction: g.agentDeduction,
         }))
       )
     } else {
@@ -150,11 +185,13 @@ export default function ImportIncomePage() {
         name: r.name,
         date: r.date,
         amount: r.amount,
-        label: r.name || r.description || r.reference || `Row ${i + 1}`,
+        label:
+          (r.name || r.description || r.reference || `Row ${i + 1}`) + agentNote(r.agentDeduction),
         passengerCount: null,
         isTaxFree: r.isTaxFree,
         include: r.amount > 0,
         vesselId: '',
+        agentDeduction: r.agentDeduction,
       }))
       setRows(built2)
       if (mode === 'file') {
@@ -182,6 +219,14 @@ export default function ImportIncomePage() {
     [includedRows]
   )
   const fileTotalAmount = useMemo(() => includedRows.reduce((sum, r) => sum + r.amount, 0), [includedRows])
+  const agentDeductionTotal = useMemo(
+    () => includedRows.reduce((sum, r) => sum + r.agentDeduction, 0),
+    [includedRows]
+  )
+  const agentTicketCount = useMemo(
+    () => includedRows.filter((r) => r.agentDeduction > 0).length,
+    [includedRows]
+  )
 
   async function confirmImport() {
     if (includedCount === 0) return
@@ -211,7 +256,7 @@ export default function ImportIncomePage() {
       }
       const lines = includedRows.map((r) => ({
         income_entry_id: entry.id,
-        name: r.name,
+        name: r.name + agentNote(r.agentDeduction),
         amount: r.amount,
         reference: r.reference,
         is_tax_free: r.isTaxFree,
@@ -315,17 +360,17 @@ export default function ImportIncomePage() {
         </Link>
         <Logo />
       </div>
-      <h1 className="text-2xl font-bold">Import income from Excel</h1>
+      <h1 className="text-2xl font-bold">Import income from Excel or CSV</h1>
 
       {step === 1 && (
         <div className="rounded-2xl border border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 space-y-4 text-center">
           <Upload size={32} strokeWidth={1.5} className="mx-auto text-gray-400 dark:text-gray-500" />
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Upload an .xlsx or .xls file. You&apos;ll map its columns next.
+            Upload an .xlsx, .xls or .csv file. You&apos;ll map its columns next.
           </p>
           <input
             type="file"
-            accept=".xlsx,.xls"
+            accept=".xlsx,.xls,.csv"
             disabled={parsing}
             onChange={(e) => {
               const file = e.target.files?.[0]
@@ -343,7 +388,7 @@ export default function ImportIncomePage() {
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Match each field to a column from your file ({sheet.rows.length} rows detected).
           </p>
-          {(['date', 'amount', 'reference', 'description', 'name'] as FieldKey[]).map((field) => (
+          {(['date', 'amount', 'reference', 'contact', 'description', 'name', 'soldBy'] as FieldKey[]).map((field) => (
             <div key={field}>
               <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
                 {FIELD_LABELS[field]}
@@ -368,6 +413,26 @@ export default function ImportIncomePage() {
               </select>
             </div>
           ))}
+
+          {mapping.soldBy != null && (
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                Deduct from each ticket sold by an agent (MVR)
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={agentDeduction}
+                onChange={(e) => setAgentDeduction(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2"
+              />
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                Applies to rows whose &quot;Sold by&quot; starts with &quot;Agent&quot;. Free (0) tickets are
+                left alone, and a ticket never goes below 0.
+              </p>
+            </div>
+          )}
 
           {mapping.date == null && (
             <div>
@@ -456,6 +521,12 @@ export default function ImportIncomePage() {
                 <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                   {zeroAmountCount} zero-amount {zeroAmountCount === 1 ? 'row is' : 'rows are'} excluded by
                   default below — often a totals/footer row rather than real data.
+                </p>
+              )}
+              {agentTicketCount > 0 && (
+                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  {agentTicketCount} agent {agentTicketCount === 1 ? 'ticket' : 'tickets'} reduced by{' '}
+                  {formatMVR(agentDeductionTotal)} in total.
                 </p>
               )}
               {taxFreeCount > 0 && (
@@ -548,6 +619,11 @@ export default function ImportIncomePage() {
                 <span className="text-emerald-600 dark:text-emerald-400"> · {taxFreeCount} tax-free, auto-matched</span>
               )}
               .
+              {agentDeductionTotal > 0 && (
+                <span className="block mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  Agent sales reduced by {formatMVR(agentDeductionTotal)} in total.
+                </span>
+              )}
               {zeroAmountCount > 0 && (
                 <span className="block mt-1 text-xs">
                   {zeroAmountCount} zero-amount {zeroAmountCount === 1 ? 'row is' : 'rows are'} unchecked by

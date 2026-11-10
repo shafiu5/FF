@@ -7,7 +7,11 @@ export type ParsedSheet = {
 
 export async function parseWorkbookFile(file: File): Promise<ParsedSheet> {
   const buffer = await file.arrayBuffer()
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
+  // CSVs are decoded as UTF-8 text here: handed raw bytes, SheetJS guesses a
+  // legacy codepage when there's no BOM and garbles characters like "·".
+  const workbook = /\.csv$/i.test(file.name)
+    ? XLSX.read(new TextDecoder('utf-8').decode(buffer), { type: 'string', cellDates: true })
+    : XLSX.read(buffer, { type: 'array', cellDates: true })
   const sheetName = workbook.SheetNames[0]
   const sheet = workbook.Sheets[sheetName]
   const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' }) as unknown[][]
@@ -23,16 +27,20 @@ export type ColumnMapping = {
   date: number | null
   amount: number | null
   reference: number | null
+  contact: number | null
   description: number | null
   name: number | null
+  soldBy: number | null
 }
 
 export const EMPTY_MAPPING: ColumnMapping = {
   date: null,
   amount: null,
   reference: null,
+  contact: null,
   description: null,
   name: null,
+  soldBy: null,
 }
 
 export type ParsedIncomeRow = {
@@ -43,6 +51,10 @@ export type ParsedIncomeRow = {
   name: string
   isTaxFree: boolean
   include: boolean
+  // Set when the ticket was sold by an agent: `amount` is already net of
+  // `agentDeduction` (0 = no deduction applied).
+  agent: string
+  agentDeduction: number
 }
 
 export type OmitRuleLike = { reference: string; contact: string }
@@ -75,29 +87,41 @@ function parseAmount(raw: string): number {
   return isNaN(n) ? 0 : n
 }
 
-export type FieldKey = 'date' | 'amount' | 'reference' | 'description' | 'name'
+export type FieldKey = 'date' | 'amount' | 'reference' | 'contact' | 'description' | 'name' | 'soldBy'
 
 const FIELD_KEYWORDS: Record<FieldKey, string[]> = {
   date: ['date'],
   amount: ['amount', 'amt', 'value', 'total', 'credit', 'price', 'fare'],
   reference: ['reference', 'ref', 'invoice', 'txn', 'transaction id', 'contact', 'phone'],
+  contact: ['mobile', 'contact', 'phone'],
   description: ['description', 'desc', 'narration', 'details', 'particulars', 'remarks'],
   name: ['name', 'passenger', 'customer'],
+  soldBy: ['sold by', 'seller', 'agent'],
 }
 
 export function guessMapping(headers: string[]): ColumnMapping {
   const mapping: ColumnMapping = { ...EMPTY_MAPPING }
   ;(Object.keys(FIELD_KEYWORDS) as FieldKey[]).forEach((field) => {
-    const idx = headers.findIndex((h) =>
-      FIELD_KEYWORDS[field].some((kw) => h.toLowerCase().includes(kw))
+    // A lone "Contact"/"Phone" column is already taken as the reference
+    // (older manifests), so only claim a separate contact column if there's
+    // another one.
+    const idx = headers.findIndex(
+      (h, i) =>
+        !(field === 'contact' && i === mapping.reference) &&
+        FIELD_KEYWORDS[field].some((kw) => h.toLowerCase().includes(kw))
     )
     if (idx !== -1) mapping[field] = idx
   })
   return mapping
 }
 
+// Agent sales are tagged like "Agent · Shibaan"; walk-ups say "Counter".
+export function isAgentSale(soldBy: string): boolean {
+  return /^agent\b/i.test(soldBy.trim())
+}
+
 const MAPPING_STORAGE_KEY = 'vessel-finance:income-import-mapping'
-const ALL_FIELDS: FieldKey[] = ['date', 'amount', 'reference', 'description', 'name']
+const ALL_FIELDS: FieldKey[] = ['date', 'amount', 'reference', 'contact', 'description', 'name', 'soldBy']
 
 export function saveMappingPreference(headers: string[], mapping: ColumnMapping): void {
   const byName: Partial<Record<FieldKey, string>> = {}
@@ -133,22 +157,36 @@ export function loadMappingPreference(headers: string[]): ColumnMapping | null {
 // `fallbackDate` fills in rows/groups when the file has no date column at
 // all (e.g. a single-trip passenger manifest) — the whole file shares one
 // date entered by the user instead.
+// `agentDeductionPerTicket` comes off every paid ticket whose "sold by" value
+// is an agent (never below zero; free tickets are left alone).
+// A row is tax-free if either its reference or its contact matches the omit
+// list, since an entry there may have been saved as either.
 export function buildIncomeRows(
   sheet: ParsedSheet,
   mapping: ColumnMapping,
   omitRules: OmitRuleLike[],
-  fallbackDate = ''
+  fallbackDate = '',
+  agentDeductionPerTicket = 0
 ): ParsedIncomeRow[] {
   return sheet.rows.map((row) => {
     const reference = mapping.reference != null ? row[mapping.reference] ?? '' : ''
+    const contact = mapping.contact != null ? row[mapping.contact] ?? '' : ''
+    const soldBy = mapping.soldBy != null ? row[mapping.soldBy] ?? '' : ''
+    const gross = parseAmount(mapping.amount != null ? row[mapping.amount] ?? '' : '')
+    const agentDeduction =
+      isAgentSale(soldBy) && gross > 0 && agentDeductionPerTicket > 0
+        ? Math.min(agentDeductionPerTicket, gross)
+        : 0
     return {
       date: normalizeDate(mapping.date != null ? row[mapping.date] ?? '' : '') || fallbackDate,
-      amount: parseAmount(mapping.amount != null ? row[mapping.amount] ?? '' : ''),
+      amount: gross - agentDeduction,
       reference,
       description: mapping.description != null ? row[mapping.description] ?? '' : '',
       name: mapping.name != null ? row[mapping.name] ?? '' : '',
-      isTaxFree: matchesOmitRule(reference, omitRules),
+      isTaxFree: matchesOmitRule(reference, omitRules) || matchesOmitRule(contact, omitRules),
       include: true,
+      agent: agentDeduction > 0 ? soldBy.trim() : '',
+      agentDeduction,
     }
   })
 }
@@ -161,6 +199,7 @@ export type GroupedIncomeRow = {
   description: string
   isTaxFree: boolean
   include: boolean
+  agentDeduction: number
 }
 
 // Groups rows that share the same reference/contact into one income entry —
@@ -194,6 +233,7 @@ export function groupIncomeRowsByReference(rows: ParsedIncomeRow[]): GroupedInco
       description,
       isTaxFree: group[0].isTaxFree,
       include: true,
+      agentDeduction: group.reduce((sum, r) => sum + r.agentDeduction, 0),
     }
   })
 }
