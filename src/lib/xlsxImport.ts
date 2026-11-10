@@ -160,13 +160,15 @@ export function loadMappingPreference(headers: string[]): ColumnMapping | null {
 // `agentDeductionPerTicket` comes off every paid ticket whose "sold by" value
 // is an agent (never below zero; free tickets are left alone).
 // A row is tax-free if either its reference or its contact matches the omit
-// list, since an entry there may have been saved as either.
+// list, since an entry there may have been saved as either — or, when
+// `agentSalesTaxFree` is set, if it was sold by an agent.
 export function buildIncomeRows(
   sheet: ParsedSheet,
   mapping: ColumnMapping,
   omitRules: OmitRuleLike[],
   fallbackDate = '',
-  agentDeductionPerTicket = 0
+  agentDeductionPerTicket = 0,
+  agentSalesTaxFree = false
 ): ParsedIncomeRow[] {
   return sheet.rows.map((row) => {
     const reference = mapping.reference != null ? row[mapping.reference] ?? '' : ''
@@ -183,7 +185,10 @@ export function buildIncomeRows(
       reference,
       description: mapping.description != null ? row[mapping.description] ?? '' : '',
       name: mapping.name != null ? row[mapping.name] ?? '' : '',
-      isTaxFree: matchesOmitRule(reference, omitRules) || matchesOmitRule(contact, omitRules),
+      isTaxFree:
+        (agentSalesTaxFree && isAgentSale(soldBy)) ||
+        matchesOmitRule(reference, omitRules) ||
+        matchesOmitRule(contact, omitRules),
       include: true,
       agent: agentDeduction > 0 ? soldBy.trim() : '',
       agentDeduction,

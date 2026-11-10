@@ -87,6 +87,7 @@ export default function ImportIncomePage() {
   const [tripDate, setTripDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [mode, setMode] = useState<ImportMode>('rows')
   const [agentDeduction, setAgentDeduction] = useState(DEFAULT_AGENT_DEDUCTION)
+  const [agentTaxFree, setAgentTaxFree] = useState(true)
 
   const [vessels, setVessels] = useState<VesselOption[]>([])
   const [omitRules, setOmitRules] = useState<OmitRuleRow[]>([])
@@ -158,7 +159,7 @@ export default function ImportIncomePage() {
     setParseError(null)
     saveMappingPreference(sheet.headers, mapping)
     const perTicket = mapping.soldBy != null ? Math.max(0, Number(agentDeduction) || 0) : 0
-    const built = buildIncomeRows(sheet, mapping, omitRules, tripDate, perTicket)
+    const built = buildIncomeRows(sheet, mapping, omitRules, tripDate, perTicket, agentTaxFree)
 
     if (mode === 'reference') {
       const grouped = groupIncomeRowsByReference(built)
@@ -431,6 +432,15 @@ export default function ImportIncomePage() {
                 Applies to rows whose &quot;Sold by&quot; starts with &quot;Agent&quot;. Free (0) tickets are
                 left alone, and a ticket never goes below 0.
               </p>
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={agentTaxFree}
+                  onChange={(e) => setAgentTaxFree(e.target.checked)}
+                  className="rounded border-gray-300 dark:border-neutral-700"
+                />
+                Agent sales are tax-free
+              </label>
             </div>
           )}
 
